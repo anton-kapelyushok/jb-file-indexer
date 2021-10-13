@@ -4,7 +4,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.Channel.Factory.CONFLATED
-import kotlinx.coroutines.channels.Channel.Factory.UNLIMITED
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.flow.Flow
@@ -61,7 +60,6 @@ class IndexState<TermData : Any> {
                 result.send(SearchResultEntry(documentName, term, termData))
             }
         }
-        result.close()
     }
 }
 
@@ -78,22 +76,20 @@ data class SearchExactMessage<TermData : Any>(
 
 /**
  * [initial state]:
- * 1. (update request) -> launch update -> move to [updating state]
+ * 1. (update request) -> schedule update; launch scheduled tasks -> move to [updating state]
  * 2. (search request) -> launch search -> move to [searching state]
  *
  * [searching state]:
  * 1. (update request) -> schedule update -> move to [searching state]
- * 2. (scheduled updates is empty + search request) -> launch search -> move to [searching state]
+ * 2. (no scheduled tasks + search request) -> launch search -> move to [searching state]
  * 3. (search finished + finished search is not last) -> do nothing -> move to [searching state]
- * 4. (search finished + finished search is last + scheduled updates empty) -> launch updates -> move to [updating state]
- * 5. (search finished + finished search is last + scheduled updates empty) -> do nothing -> move to [initial state]
+ * 4. (search finished + finished search is last + has scheduled tasks) -> launch scheduled tasks -> move to [updating state]
+ * 5. (search finished + finished search is last + no scheduled tasks) -> do nothing -> move to [initial state]
  *
  * [updating state]:
- * 1. (update finish + scheduled is empty + running is empty) -> do nothing  -> move to [initial state]
- * 2. (update finish + scheduled is empty + running is not empty) -> do nothing  -> move to [updating state]
- * 3. (update finish + scheduled is not empty) -> launch scheduled -> move to [updating state]
- * 4. (update request + running is not empty) -> cancel running + schedule update -> move to [updating state]
- * 5. (update request + running is empty) -> launch update -> move to [updating state]
+ * 1. (update finish + has scheduled tasks) -> launch scheduled tasks -> move to [updating state]
+ * 2. (update finish + no scheduled tasks) -> do nothing  -> move to [initial state]
+ * 3. (update request) -> schedule update; launch scheduled tasks -> move to [updating state]
  */
 class IndexOrchestrator<TermData : Any>(
     private val indexState: IndexState<TermData>,
@@ -111,8 +107,7 @@ class IndexOrchestrator<TermData : Any>(
     private val runningUpdates = mutableMapOf<DocumentName, SendChannel<Unit>>()
     private val scheduledUpdates = mutableMapOf<DocumentName, UpdateDocumentMessage<TermData>>()
 
-    // unlimited because I want to cancel running outdated tasks
-    private val runUpdate = Channel<Pair<UpdateDocumentMessage<TermData>, ReceiveChannel<Unit>>>(UNLIMITED)
+    private val runUpdate = Channel<Pair<UpdateDocumentMessage<TermData>, ReceiveChannel<Unit>>>()
     private val updateFinished = Channel<DocumentName>()
 
     fun go(scope: CoroutineScope): Job = scope.launch {
@@ -131,14 +126,13 @@ class IndexOrchestrator<TermData : Any>(
                         handleUpdateFinished(documentName)
                     }
 
-                    if (runningSearches == 0) {
-                        this@IndexOrchestrator.updateMailbox.onReceive { msg ->
-                            println("received $msg")
-                            handleUpdateRequest(msg)
-                        }
+                    updateMailbox.onReceive { msg ->
+                        println("received $msg")
+                        handleUpdateRequest(msg)
                     }
+
                     if (runningUpdates.isEmpty() && scheduledUpdates.isEmpty()) {
-                        this@IndexOrchestrator.searchMailbox.onReceive { msg ->
+                        searchMailbox.onReceive { msg ->
                             println("received $msg")
                             handleSearchRequest(msg)
                         }
@@ -146,10 +140,9 @@ class IndexOrchestrator<TermData : Any>(
                 }
             }
         } finally {
-            this@IndexOrchestrator.searchMailbox.cancel()
-            this@IndexOrchestrator.updateMailbox.cancel()
+            searchMailbox.cancel()
+            updateMailbox.cancel()
         }
-
     }
 
     private fun CoroutineScope.handleSearchRequest(msg: SearchExactMessage<TermData>) {
@@ -157,32 +150,31 @@ class IndexOrchestrator<TermData : Any>(
     }
 
     private suspend fun handleUpdateRequest(msg: UpdateDocumentMessage<TermData>) {
-        val runningUpdate = runningUpdates[msg.documentName]
-        if (runningUpdate != null) {
-            runningUpdate.send(Unit) // cancel current update
-            scheduledUpdates[msg.documentName] = msg // schedule latest
-        } else {
-            sendUpdate(msg)
-        }
+        runningUpdates[msg.documentName]?.send(Unit)
+        scheduledUpdates[msg.documentName] = msg
+        if (runningSearches == 0) sendScheduledUpdates()
     }
 
     private suspend fun handleUpdateFinished(documentName: DocumentName) {
         runningUpdates.remove(documentName)
-
-        if (documentName in scheduledUpdates) {
-            val msg = scheduledUpdates[documentName]!!
-            scheduledUpdates.remove(documentName)
-            sendUpdate(msg)
-        }
+        sendScheduledUpdates()
     }
 
     private suspend fun handleSearchFinished() {
         runningSearches--
         if (runningSearches == 0) {
-            scheduledUpdates.forEach { (_, msg) ->
+            sendScheduledUpdates()
+        }
+    }
+
+    private suspend fun sendScheduledUpdates() {
+        scheduledUpdates.entries
+            .filter { (documentName) -> documentName !in runningUpdates }
+            .take(updateWorkersCount - runningUpdates.size)
+            .forEach { (documentName, msg) ->
+                scheduledUpdates.remove(documentName)
                 sendUpdate(msg)
             }
-        }
     }
 
     private suspend fun sendUpdate(msg: UpdateDocumentMessage<TermData>) {
@@ -194,7 +186,6 @@ class IndexOrchestrator<TermData : Any>(
     private fun CoroutineScope.launchSearch(msg: SearchExactMessage<TermData>): Job {
         runningSearches++
         return launch {
-
             try {
                 handleFlowFromActorMessage(msg) { result ->
                     indexState.searchExact(msg.term, result)
