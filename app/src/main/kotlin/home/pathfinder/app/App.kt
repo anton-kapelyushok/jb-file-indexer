@@ -2,15 +2,50 @@ package home.pathfinder.app
 
 import home.pathfinder.indexing.HashMapIndex
 import home.pathfinder.indexing.Posting
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 fun main() {
     // TODO: convert to test
     runBlocking {
+        val channel = Channel<String>()
+        delay(200)
+        val job1 = launch {
+            try {
+                println("job 1 launch")
+                channel.send("1")
+            } catch (e: Exception) {
+                println("job 1 $e isActive = $isActive")
+                delay(10000)
+            }
+        }
+
+        val job2 = launch {
+            try {
+                println("job 2 launch")
+                channel.send("2")
+            } catch (e: Exception) {
+                println("job 2 $e isActive = $isActive")
+                delay(10000)
+            }
+        }
+
+
+        delay(200L)
+
+        job2.cancel()
+        channel.cancel()
+
+        job1.join()
+        job2.join()
+
+
+        delay(2000)
+        error("return")
+
+
         val index = HashMapIndex<String>()
 
         val indexWorker = launch { index.go(this) }

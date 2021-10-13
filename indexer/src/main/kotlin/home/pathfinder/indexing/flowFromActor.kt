@@ -1,14 +1,12 @@
 package home.pathfinder.indexing
 
-import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.Channel.Factory.CONFLATED
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
-import kotlinx.coroutines.supervisorScope
-import kotlinx.coroutines.withContext
 
 // TODO: remove excessive logging
 fun log(message: Any) {
@@ -22,6 +20,8 @@ interface FlowFromActorMessage<ResultData : Any> {
     val dataChannel: SendChannel<ResultData>
 }
 
+class ActorException(e: Throwable) : RuntimeException(e)
+
 fun <MessageType : Any, ResultData : Any> flowFromActor(
     mailBox: SendChannel<MessageType>,
     createMessage: (
@@ -30,31 +30,44 @@ fun <MessageType : Any, ResultData : Any> flowFromActor(
     ) -> MessageType
 ) = flow {
     val dataChannel = Channel<ResultData>()
-    val cancelChannel = Channel<Unit>()
-    mailBox.send(createMessage(cancelChannel, dataChannel))
+    val cancelChannel = Channel<Unit>(CONFLATED)
 
-    while (true) {
-        val next = dataChannel.receiveCatching()
-
-        val msg = next.getOrNull()
-        if (msg != null) {
-            try {
-                emit(msg)
-            } catch (e: Exception) { // receiver exception
-                log("flow emit exception $e")
-                withContext(NonCancellable) {
-                    log("flow cancel")
-                    cancelChannel.send(Unit)
-                    throw e
-                }
+    try {
+        try {
+            mailBox.send(createMessage(cancelChannel, dataChannel))
+        } catch (e: CancellationException) {
+            if (currentCoroutineContext().isActive) {
+                throw ActorException(e) // because I want to distinguish job.cancel() and channel.cancel()
+            } else {
+                throw e
             }
-        } else {
-            val exception = next.exceptionOrNull()
-            if (exception != null) { // actor exception
-                throw exception
-            }
-            break
         }
+
+        while (true) {
+            val next = dataChannel.receiveCatching()
+
+            val msg = next.getOrNull()
+            if (msg != null) {
+                try {
+                    emit(msg)
+                } catch (e: Exception) { // receiver exception
+                    log("flow emit exception $e")
+                    withContext(NonCancellable) {
+                        log("flow cancel")
+                        cancelChannel.send(Unit)
+                        throw e
+                    }
+                }
+            } else {
+                val exception = next.exceptionOrNull()
+                if (exception != null) { // actor exception
+                    throw ActorException(exception)
+                }
+                break // channel is closed
+            }
+        }
+    } finally {
+        cancelChannel.send(Unit)
     }
 }
 
