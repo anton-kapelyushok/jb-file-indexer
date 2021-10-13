@@ -191,15 +191,17 @@ class IndexOrchestrator<TermData : Any>(
         runningUpdates[msg.documentName] = channel
     }
 
-    private fun CoroutineScope.launchSearch(msg: SearchExactMessage<TermData>) = launch {
+    private fun CoroutineScope.launchSearch(msg: SearchExactMessage<TermData>): Job {
         runningSearches++
+        return launch {
 
-        try {
-            handleFlowFromActorMessage(msg) { result ->
-                indexState.searchExact(msg.term, result)
+            try {
+                handleFlowFromActorMessage(msg) { result ->
+                    indexState.searchExact(msg.term, result)
+                }
+            } finally {
+                searchFinished.send(Unit)
             }
-        } finally {
-            searchFinished.send(Unit)
         }
     }
 
