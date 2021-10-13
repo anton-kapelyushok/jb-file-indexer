@@ -76,7 +76,25 @@ data class SearchExactMessage<TermData : Any>(
     override val cancelChannel: ReceiveChannel<Unit>,
 ) : FlowFromActorMessage<SearchResultEntry<TermData>>
 
-
+/**
+ * [initial state]:
+ * 1. (update request) -> launch update -> move to [updating state]
+ * 2. (search request) -> launch search -> move to [searching state]
+ *
+ * [searching state]:
+ * 1. (update request) -> schedule update -> move to [searching state]
+ * 2. (scheduled updates is empty + search request) -> launch search -> move to [searching state]
+ * 3. (search finished + finished search is not last) -> do nothing -> move to [searching state]
+ * 4. (search finished + finished search is last + scheduled updates empty) -> launch updates -> move to [updating state]
+ * 5. (search finished + finished search is last + scheduled updates empty) -> do nothing -> move to [initial state]
+ *
+ * [updating state]:
+ * 1. (update finish + scheduled is empty + running is empty) -> do nothing  -> move to [initial state]
+ * 2. (update finish + scheduled is empty + running is not empty) -> do nothing  -> move to [updating state]
+ * 3. (update finish + scheduled is not empty) -> launch scheduled -> move to [updating state]
+ * 4. (update request + running is not empty) -> cancel running + schedule update -> move to [updating state]
+ * 5. (update request + running is empty) -> launch update -> move to [updating state]
+ */
 class IndexOrchestrator<TermData : Any>(
     private val indexState: IndexState<TermData>,
     private val updateWorkersCount: Int = 2,
