@@ -7,6 +7,8 @@ plugins {
 }
 
 dependencies {
+    implementation project(':indexer')
+
     implementation 'org.apache.commons:commons-text'
 }
 
