@@ -1,3 +1,7 @@
 plugins {
     id 'home.pathfinder.kotlin-library-conventions'
 }
+
+dependencies {
+    implementation 'io.methvin:directory-watcher:0.15.0'
+}

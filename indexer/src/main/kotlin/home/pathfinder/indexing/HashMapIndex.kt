@@ -14,12 +14,11 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermData> {
+class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermData>, Actor {
 
     private val indexState = IndexState<TermData>()
     private val indexOrchestrator = IndexOrchestrator(
         indexState = indexState,
-        updateWorkersCount = 2,
     )
 
     override suspend fun updateDocument(name: DocumentName, terms: Flow<Posting<TermData>>) {
@@ -29,7 +28,7 @@ class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermData> {
     override suspend fun searchExact(term: DocumentName): Flow<SearchResultEntry<TermData>> =
         flowFromActor(indexOrchestrator.searchMailbox) { cancel, data -> SearchExactMessage(term, data, cancel) }
 
-    fun go(scope: CoroutineScope) = indexOrchestrator.go(scope)
+    override fun go(scope: CoroutineScope) = indexOrchestrator.go(scope)
 }
 
 class IndexState<TermData : Any> {
@@ -94,8 +93,8 @@ data class SearchExactMessage<TermData : Any>(
 class IndexOrchestrator<TermData : Any>(
     private val indexState: IndexState<TermData>,
     private val updateWorkersCount: Int = 2,
-    private val stateUpdateBatchSize: Int = 1000,
-) {
+    private val stateUpdateBatchSize: Int = 128,
+) : Actor {
     val searchMailbox = Channel<SearchExactMessage<TermData>>()
     val updateMailbox = Channel<UpdateDocumentMessage<TermData>>()
 
@@ -110,30 +109,30 @@ class IndexOrchestrator<TermData : Any>(
     private val runUpdate = Channel<Pair<UpdateDocumentMessage<TermData>, ReceiveChannel<Unit>>>()
     private val updateFinished = Channel<DocumentName>()
 
-    fun go(scope: CoroutineScope): Job = scope.launch {
+    override fun go(scope: CoroutineScope): Job = scope.launch {
         try {
             repeat(updateWorkersCount) { launchUpdateWorker() }
 
             while (true) {
                 select<Unit> {
                     searchFinished.onReceive {
-                        println("received searchFinished")
+//                        println("received searchFinished")
                         handleSearchFinished()
                     }
 
                     updateFinished.onReceive { documentName ->
-                        println("received update finished on$documentName")
+//                        println("received update finished on$documentName")
                         handleUpdateFinished(documentName)
                     }
 
                     updateMailbox.onReceive { msg ->
-                        println("received $msg")
+//                        println("received $msg")
                         handleUpdateRequest(msg)
                     }
 
                     if (runningUpdates.isEmpty() && scheduledUpdates.isEmpty()) {
                         searchMailbox.onReceive { msg ->
-                            println("received $msg")
+//                            println("received $msg")
                             handleSearchRequest(msg)
                         }
                     }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.selects.select
 
 // TODO: remove excessive logging
 fun log(message: Any) {
+    return
     val threadName = Thread.currentThread().name
     val lineNumber = Thread.currentThread().stackTrace[2].lineNumber
     println("flowFromActor.kt:$threadName:$lineNumber: $message")
@@ -22,6 +23,8 @@ interface FlowFromActorMessage<ResultData : Any> {
 
 class ActorException(e: Throwable) : RuntimeException(e)
 
+
+// TODO: that is probably overcomplicated
 fun <MessageType : Any, ResultData : Any> flowFromActor(
     mailBox: SendChannel<MessageType>,
     createMessage: (

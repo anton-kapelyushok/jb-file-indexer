@@ -1,53 +1,35 @@
 package home.pathfinder.app
 
-import home.pathfinder.indexing.HashMapIndex
-import home.pathfinder.indexing.Posting
+import home.pathfinder.indexing.FileIndexer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlin.system.measureTimeMillis
 
 fun main() {
     // TODO: convert to test
     runBlocking {
-        val index = HashMapIndex<String>()
 
-        val indexWorker = launch { index.go(this) }
+        val fileIndexer = FileIndexer(listOf("."), listOf(""".*/\.git/.*""", """.*/build/.*""", """.*/gradle/.*"""))
 
-        val doc = { docId: Int ->
-            flow {
-                try {
-                    for (i in 1..5) {
-                        println("doc$docId doc emit $i")
-                        emit(Posting("term$i", "doc$docId $i"))
-                        println("doc$docId start delay")
-                        delay(i * 400L)
-                    }
-                    println("doc$docId flow finish")
-                } finally {
-                    println("doc$docId finally")
-                }
-            }
+        launch { fileIndexer.go(this) }
+
+        val startTime = measureTimeMillis {
+            delay(100)
+            fileIndexer.searchExact("override").collect {  }
         }
 
-        index.updateDocument("doc1", doc(1))
-        index.updateDocument("doc2", doc(2))
-        index.updateDocument("doc3", doc(3))
-        index.updateDocument("doc1", doc(4))
-        index.updateDocument("doc1", doc(5))
+        println("started in $startTime")
 
-        index.searchExact("term1").collect { println(it) }
-        launch { index.searchExact("term2").collect { println(it); delay(400) } }
-        launch { index.searchExact("term2").collect { println(it); delay(400) } }
-
-        delay(200)
-        index.updateDocument("doc1", doc(6))
-        index.updateDocument("doc1", doc(7))
-        index.updateDocument("doc1", doc(8))
-        println("after update")
-
-        index.searchExact("term2").collect { println(it) }
-        indexWorker.cancel()
+        launch(Dispatchers.IO) {
+            while (true) {
+                println("enter term")
+                val term = readLine()!!
+                fileIndexer.searchExact(term).onEach { println(it) }.collect()
+            }
+        }
     }
 }
