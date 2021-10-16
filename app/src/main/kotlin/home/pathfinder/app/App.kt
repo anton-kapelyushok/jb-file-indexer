@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlin.system.measureTimeMillis
@@ -13,13 +14,16 @@ fun main() {
     // TODO: convert to test
     runBlocking {
 
-        val fileIndexer = FileIndexer(listOf("."), listOf(""".*/\.git/.*""", """.*/build/.*""", """.*/gradle/.*"""))
+        val fileIndexer = FileIndexer(listOf(""".*/\.git/.*""", """.*/build/.*""", """.*/gradle/.*"""))
 
         launch { fileIndexer.go(this) }
 
+        fileIndexer.add("indexer/src")
+
+        println("here")
         val startTime = measureTimeMillis {
             delay(100)
-            fileIndexer.searchExact("override").collect {  }
+            println(fileIndexer.searchExact("override").toList().size)
         }
 
         println("started in $startTime")
@@ -28,7 +32,12 @@ fun main() {
             while (true) {
                 println("enter term")
                 val term = readLine()!!
-                fileIndexer.searchExact(term).onEach { println(it) }.collect()
+
+                if (term == "remove") {
+                    fileIndexer.remove("indexer/src")
+                } else {
+                    fileIndexer.searchExact(term).onEach { println(it) }.collect()
+                }
             }
         }
     }

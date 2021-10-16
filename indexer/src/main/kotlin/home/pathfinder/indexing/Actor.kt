@@ -4,5 +4,5 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 
 interface Actor {
-    fun go(scope: CoroutineScope): Job
+    suspend fun go(scope: CoroutineScope): Job
 }

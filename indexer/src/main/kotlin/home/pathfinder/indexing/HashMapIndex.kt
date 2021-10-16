@@ -28,7 +28,7 @@ class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermData>, Act
     override suspend fun searchExact(term: DocumentName): Flow<SearchResultEntry<TermData>> =
         flowFromActor(indexOrchestrator.searchMailbox) { cancel, data -> SearchExactMessage(term, data, cancel) }
 
-    override fun go(scope: CoroutineScope) = indexOrchestrator.go(scope)
+    override suspend fun go(scope: CoroutineScope) = indexOrchestrator.go(scope)
 }
 
 class IndexState<TermData : Any> {
@@ -109,7 +109,7 @@ class IndexOrchestrator<TermData : Any>(
     private val runUpdate = Channel<Pair<UpdateDocumentMessage<TermData>, ReceiveChannel<Unit>>>()
     private val updateFinished = Channel<DocumentName>()
 
-    override fun go(scope: CoroutineScope): Job = scope.launch {
+    override suspend fun go(scope: CoroutineScope): Job = scope.launch {
         try {
             repeat(updateWorkersCount) { launchUpdateWorker() }
 
