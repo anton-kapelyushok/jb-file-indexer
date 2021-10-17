@@ -75,20 +75,26 @@ class RootWatcher(
             val job = launch(Dispatchers.IO) {
                 var watcher: DirectoryWatcher? = null
                 try {
-                    watcher = initializeWatcher()
+                    watcher = runInterruptible { initializeWatcher() }
                     yield()
-                    emitInitialDirectoryStructure()
+                    runInterruptible { emitInitialDirectoryStructure() }
                     started.send(Unit)
                     launch {
                         try {
-                            watcher.watch()
+                            runInterruptible { watcher.watch() }
                         } catch (e: ClosedWatchServiceException) {
                             // ignore
+                        } catch (e: Throwable) {
+                            // TODO
+                            println("first $e")
+                            throw e
                         }
                     }
                     awaitCancellation()
                 } catch (e: Throwable) {
                     if (e !is CancellationException) emitError(e)
+                    // TODO
+                    println("second $e")
                     awaitCancellation()
                 } finally {
                     watcher?.close()
@@ -128,6 +134,7 @@ class RootWatcher(
     private fun initializeWatcher(): DirectoryWatcher = DirectoryWatcher.builder()
         .logger(NOPLogger.NOP_LOGGER)
         .path(Paths.get(root))
+        .fileHashing(false)
         .listener { event ->
             runBlocking {
                 val path = event.path().canonicalPath
@@ -146,6 +153,7 @@ class RootWatcher(
         Files.walk(Paths.get(root))
             .use { stream ->
                 stream.filter(Files::isRegularFile)
+                    
                     .forEach {
                         runBlocking {
                             emitFileAdded(it.canonicalPath)

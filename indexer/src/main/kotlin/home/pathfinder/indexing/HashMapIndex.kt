@@ -105,14 +105,13 @@ class IndexOrchestrator<TermData : Any>(
     private val stateUpdateBatchSize: Int = 128,
 ) : Actor {
     val searchMailbox = Channel<SearchExactMessage<TermData>>()
-    val updateMailbox = Channel<UpdateDocumentMessage<TermData>>()
+    val updateMailbox = Channel<UpdateDocumentMessage<TermData>>(Int.MAX_VALUE)
     val searchLockUpdates = Channel<Boolean>()
 
     private val stateUpdateMutex = Mutex()
 
     private var runningSearches = 0
     private var searchFinished = Channel<Unit>()
-
 
     private val runningUpdates = mutableMapOf<DocumentName, SendChannel<Unit>>()
     private val scheduledUpdates = mutableMapOf<DocumentName, UpdateDocumentMessage<TermData>>()
@@ -184,7 +183,7 @@ class IndexOrchestrator<TermData : Any>(
     }
 
     private suspend fun sendScheduledUpdates() {
-        scheduledUpdates.entries
+        scheduledUpdates.asSequence()
             .filter { (documentName) -> documentName !in runningUpdates }
             .take(updateWorkersCount - runningUpdates.size)
             .forEach { (documentName, msg) ->

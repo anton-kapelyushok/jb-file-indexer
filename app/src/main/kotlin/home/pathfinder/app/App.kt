@@ -3,9 +3,14 @@ package home.pathfinder.app
 import home.pathfinder.indexing.FileIndexerImpl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlin.system.measureTimeMillis
+import kotlin.time.ExperimentalTime
+import kotlin.time.measureTimedValue
 
+@OptIn(ExperimentalTime::class)
 fun main() {
     runBlocking {
 
@@ -14,7 +19,7 @@ fun main() {
         launch { fileIndexer.go(this) }
 
         launch {
-            fileIndexer.updateContentRoots(setOf("indexer/src/main"))
+            fileIndexer.updateContentRoots(setOf("."))
             fileIndexer.searchExact("override").collect { println(it) }
         }
 
@@ -31,7 +36,13 @@ fun main() {
 
                 when (val cmd = parts[0]) {
                     "roots" -> fileIndexer.updateContentRoots(parts.subList(1, parts.size).toSet())
-                    "search" -> fileIndexer.searchExact(parts[1]).collect { println(it) }
+                    "search" -> {
+                        val (value, duration) = measureTimedValue {
+                            fileIndexer.searchExact(parts[1]).toList()
+                        }
+                        println(value)
+                        println("Found in ${duration.inWholeMilliseconds}ms")
+                    }
                     else -> println("unknown cmd $cmd")
                 }
             }
