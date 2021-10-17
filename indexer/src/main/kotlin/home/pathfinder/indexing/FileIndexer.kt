@@ -3,6 +3,7 @@ package home.pathfinder.indexing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.Channel.Factory.CONFLATED
 import kotlinx.coroutines.channels.Channel.Factory.UNLIMITED
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -39,8 +40,11 @@ sealed interface RootState {
 sealed interface UpdateRequest {
     val path: String
 
-    data class AddRoot(override val path: String) : UpdateRequest
-    data class RemoveRoot(override val path: String) : UpdateRequest
+    data class RootAdded(override val path: String) : UpdateRequest
+    data class RootRemoved(override val path: String) : UpdateRequest
+    data class WatcherOverflown(override val path: String) : UpdateRequest
+    data class RootInitialized(override val path: String) : UpdateRequest
+    data class WatcherFinished(override val path: String) : UpdateRequest
 }
 
 sealed interface UserRequest {
@@ -50,13 +54,14 @@ sealed interface UserRequest {
 
 class FileIndexerImpl : FileIndexer {
 
-    private val runningJobs = mutableMapOf<String, RootState>()
+    private val rootStates = mutableMapOf<String, RootState>()
+    private val watchedRoots = mutableSetOf<String>()
+
     private val updateRequests = Channel<UpdateRequest>()
+
     private val watcherFinishes = Channel<String>()
 
     private val searchRequests = Channel<UserRequest.Search>(UNLIMITED)
-
-    private val scheduledUpdates = mutableSetOf<String>()
 
     private val userRequestsChannel = Channel<UserRequest>()
 
@@ -74,7 +79,7 @@ class FileIndexerImpl : FileIndexer {
             launch {
                 for (msg in fileUpdateChannel) {
                     when (msg) {
-                        is FileEvent.FileRemoved -> index.updateDocument(msg.path, flow {})
+                        is FileEvent.FileRemoved -> index.removeDocument(msg.path)
                         is FileEvent.FileUpdated -> index.updateDocument(msg.path, readPath(msg.path))
                     }
                 }
@@ -96,12 +101,12 @@ class FileIndexerImpl : FileIndexer {
 
                                     toAdd.forEach {
 //                                        println("Posting ${UpdateRequest.AddRoot(it)}")
-                                        updateRequests.send(UpdateRequest.AddRoot(it))
+                                        updateRequests.send(UpdateRequest.RootAdded(it))
                                     }
 
                                     toRemove.forEach {
 //                                        println("Posting ${UpdateRequest.RemoveRoot(it)}")
-                                        updateRequests.send(UpdateRequest.RemoveRoot(it))
+                                        updateRequests.send(UpdateRequest.RootRemoved(it))
                                     }
                                 }
                                 is UserRequest.Search -> {
@@ -118,53 +123,54 @@ class FileIndexerImpl : FileIndexer {
 
                 while (true) {
                     select<Unit> {
-                        watcherFinishes.onReceive { path ->
-//                            println("Received updateFinishes $path")
-                            runningJobs.remove(path)
-                            launchScheduledUpdates(workerScope)
-
-                            updateIndexLockingStatus()
-                        }
-
                         updateRequests.onReceive { request ->
-//                            println("Received updateRequests $request")
+                            println("Received updateRequests $request")
                             when (request) {
-                                is UpdateRequest.AddRoot -> {
-                                    when (val runningUpdate = runningJobs[request.path]) {
-                                        null, is RootState.Canceling -> scheduledUpdates += request.path
-                                        is RootState.Initializing, is RootState.Running -> Unit
-                                    }
+                                is UpdateRequest.RootAdded -> {
+                                    watchedRoots += request.path
                                 }
-                                is UpdateRequest.RemoveRoot -> {
-                                    when (val runningUpdate = runningJobs[request.path]) {
-                                        null, is RootState.Canceling -> scheduledUpdates -= request.path
+                                is UpdateRequest.RootRemoved -> {
+                                    watchedRoots -= request.path
+                                    when (val rootState = rootStates[request.path]) {
                                         is RootState.Initializing -> {
-                                            runningUpdate.cancel.send(Unit)
-                                            runningJobs[request.path] = RootState.Canceling
+                                            rootState.cancel.send(Unit)
+                                            rootStates[request.path] = RootState.Canceling
                                         }
                                         is RootState.Running -> {
-                                            runningUpdate.cancel.send(Unit)
-                                            runningJobs[request.path] = RootState.Canceling
+                                            rootState.cancel.send(Unit)
+                                            rootStates[request.path] = RootState.Canceling
                                         }
                                     }
+                                }
+                                is UpdateRequest.RootInitialized -> {
+                                    when (val rootState = rootStates[request.path]) {
+                                        is RootState.Initializing -> {
+                                            rootStates[request.path] = RootState.Running(rootState.cancel)
+                                        }
+                                    }
+                                }
+                                is UpdateRequest.WatcherOverflown -> {
+                                    when (val rootState = rootStates[request.path]) {
+                                        is RootState.Initializing -> {
+                                            rootState.cancel.send(Unit)
+                                            rootStates[request.path] = RootState.Canceling
+                                        }
+                                        is RootState.Running -> {
+                                            rootState.cancel.send(Unit)
+                                            rootStates[request.path] = RootState.Canceling
+                                        }
+                                    }
+                                }
+                                is UpdateRequest.WatcherFinished -> {
+                                    rootStates -= request.path
                                 }
                             }
 
-                            launchScheduledUpdates(workerScope)
-                            updateIndexLockingStatus()
-                        }
-
-                        watcherRunningChannel.onReceive { path ->
-//                            println("Received watcherRunningChannel")
-
-                            val runningJob = runningJobs[path] ?: return@onReceive
-                            if (runningJob !is RootState.Initializing) return@onReceive
-                            runningJobs[path] = RootState.Running(runningJob.cancel)
+                            launchMissingWatchers(workerScope)
                             updateIndexLockingStatus()
                         }
 
                         searchRequests.onReceive { request ->
-//                            println("Received searchRequests $request")
                             request.ready.send(Unit)
                         }
                     }
@@ -178,53 +184,52 @@ class FileIndexerImpl : FileIndexer {
     }
 
     override suspend fun searchExact(term: String): Flow<SearchResultEntry<Int>> = flow {
-        val ready = Channel<Unit>()
+        val ready = Channel<Unit>(CONFLATED)
         userRequestsChannel.send(UserRequest.Search(term, ready))
         ready.receive()
 
         index.searchExact(term).onEach { emit(it) }.collect()
     }
 
-    private suspend fun launchScheduledUpdates(scope: CoroutineScope) {
-        val updatesToRun = scheduledUpdates
-            .filter { it !in runningJobs }
-
-        println("updatesToRun $updatesToRun")
+    private suspend fun launchMissingWatchers(scope: CoroutineScope) {
+        val updatesToRun = watchedRoots
+            .filter { it !in rootStates }
 
         updatesToRun.forEach {
             launchWatcher(scope, it)
         }
-
-        scheduledUpdates.removeAll(updatesToRun)
     }
 
     private suspend fun launchWatcher(scope: CoroutineScope, path: String) {
-        assert(runningJobs[path] == null)
+        assert(rootStates[path] == null)
 
-        val watcher = RootWatcher(path, fileUpdateChannel)
-        val cancel = Channel<Unit>()
-        val started = Channel<Unit>()
+        val overflow = Channel<Unit>(CONFLATED)
+        val cancel = Channel<Unit>(CONFLATED)
+        val started = Channel<Unit>(CONFLATED)
 
-        runningJobs[path] = RootState.Initializing(cancel)
+        val watcher = RootWatcher(path, fileUpdateChannel, started, overflow, cancel)
+
+        rootStates[path] = RootState.Initializing(cancel)
 
         scope.launch {
             try {
                 var running = true
-//                println("launchWatcher launch $path")
-                val job = watcher.go(this, started, cancel)
+                val job = watcher.go(this)
                 while (running) {
                     select<Unit> {
                         started.onReceive {
-                            watcherRunningChannel.send(path)
+                            updateRequests.send(UpdateRequest.RootInitialized(path))
+                        }
+                        overflow.onReceive {
+                            updateRequests.send(UpdateRequest.WatcherOverflown(path))
                         }
                         job.onJoin { running = false }
                     }
                 }
             } finally {
-                watcherFinishes.send(path)
+                updateRequests.send(UpdateRequest.WatcherFinished(path))
             }
         }
-
     }
 
     override val stateFlow: StateFlow<FileIndexerState> get() = null!!
@@ -247,13 +252,11 @@ class FileIndexerImpl : FileIndexer {
         }
     }.flowOn(Dispatchers.IO)
 
-
     private suspend fun updateIndexLockingStatus() {
-        val hasRunningBatches = runningJobs.values.any { it !is RootState.Running }
-        val hasScheduledBatches = scheduledUpdates.size > 0
-        val searchLocked = hasRunningBatches || hasScheduledBatches
-
-        index.setSearchLockStatus(searchLocked)
+        val allWatchersAreRunning = rootStates.values.all { it is RootState.Running }
+        val allRootsAreWatched = (watchedRoots - rootStates.keys).isEmpty()
+        val searchIsAllowed = allWatchersAreRunning && allRootsAreWatched
+        index.setSearchLockStatus(status = !searchIsAllowed)
     }
 }
 

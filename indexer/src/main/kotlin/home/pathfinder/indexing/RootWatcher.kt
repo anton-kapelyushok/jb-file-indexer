@@ -15,61 +15,62 @@ import java.nio.file.Paths
 
 private val Path.canonicalPath: String get() = toFile().canonicalPath
 
-sealed interface RootWatcherOperation {
-    object StartWatching : RootWatcherOperation
-    object FinishWatching : RootWatcherOperation
-}
-
-sealed interface RootWatcherStatusUpdate {
-    object Started : RootWatcherStatusUpdate
-    object Overflow : RootWatcherStatusUpdate
-    object Error : RootWatcherStatusUpdate
-    object Stopped : RootWatcherStatusUpdate
-}
-
 sealed interface FileEvent {
     data class FileUpdated(val path: String) : FileEvent
     data class FileRemoved(val path: String) : FileEvent
 }
 
+sealed interface RootWatcherEvent {
+    data class RootWatcherFileEvent(val event: FileEvent) : RootWatcherEvent
+    object RemoveAll : RootWatcherEvent
+}
+
 class RootWatcher(
     root: String,
-    private val output: SendChannel<FileEvent>
-) {
+    private val output: SendChannel<FileEvent>,
+    private val started: SendChannel<Unit>,
+    private val overflow: SendChannel<Unit>,
+    private val cancel: ReceiveChannel<Unit>
+) : Actor {
 
     private val root = Paths.get(root).canonicalPath
-    private val internalFiles = Channel<Any>()
+    private val internalEvents = Channel<RootWatcherEvent>()
 
-    suspend fun go(scope: CoroutineScope, started: Channel<Unit>, cancel: ReceiveChannel<Unit>): Job = scope.launch {
-        launchManagedFilesWorker()
-        launchWatchWorker(started, cancel)
+    override suspend fun go(
+        scope: CoroutineScope
+    ): Job = scope.launch {
+        launchStateHolder()
+        launchWatchWorker()
     }
 
-    private fun CoroutineScope.launchManagedFilesWorker() = launch {
+    private fun CoroutineScope.launchStateHolder() = launch {
         val files = mutableSetOf<String>()
-        for (event in internalFiles) {
-            if (event is FileEvent) {
-                when (event) {
-                    is FileEvent.FileUpdated -> {
-                        files += event.path
-                        output.send(event)
-                    }
-                    is FileEvent.FileRemoved -> {
-                        files -= event.path
-                        output.send(event)
+        for (event in internalEvents) {
+            when (event) {
+                is RootWatcherEvent.RootWatcherFileEvent -> {
+                    when (val fileEvent = event.event) {
+                        is FileEvent.FileUpdated -> {
+                            files += fileEvent.path
+                            output.send(fileEvent)
+                        }
+                        is FileEvent.FileRemoved -> {
+                            files -= fileEvent.path
+                            output.send(fileEvent)
+                        }
                     }
                 }
-            } else if (event == "removeall") {
-                files.forEach {
-//                    println("remove $it")
-                    output.send(FileEvent.FileRemoved(it))
+                RootWatcherEvent.RemoveAll -> {
+                    files.forEach {
+//                        println("remove $it")
+                        output.send(FileEvent.FileRemoved(it))
+                    }
+                    files.clear()
                 }
-                files.clear()
             }
         }
     }
 
-    private fun CoroutineScope.launchWatchWorker(started: SendChannel<Unit>, cancel: ReceiveChannel<Unit>) =
+    private fun CoroutineScope.launchWatchWorker() =
         launch {
             val job = launch(Dispatchers.IO) {
                 var watcher: DirectoryWatcher? = null
@@ -88,6 +89,7 @@ class RootWatcher(
                     awaitCancellation()
                 } catch (e: Throwable) {
                     if (e !is CancellationException) emitError(e)
+                    awaitCancellation()
                 } finally {
                     watcher?.close()
                 }
@@ -101,29 +103,27 @@ class RootWatcher(
                 }
             }
 
-            // TODO
-            internalFiles.send("removeall")
-            internalFiles.close()
+            internalEvents.send(RootWatcherEvent.RemoveAll)
+            internalEvents.close()
         }
 
     private suspend fun emitFileAdded(path: String) {
 //        println("add $path")
-        internalFiles.send(FileEvent.FileUpdated(path))
+        internalEvents.send(RootWatcherEvent.RootWatcherFileEvent(FileEvent.FileUpdated(path)))
     }
 
     private suspend fun emitFileRemoved(path: String) {
 //        println("remove $path")
-        internalFiles.send(FileEvent.FileRemoved(path))
+        internalEvents.send(RootWatcherEvent.RootWatcherFileEvent(FileEvent.FileRemoved(path)))
     }
 
     private suspend fun emitOverflow() {
-        // TODO
+        overflow.send(Unit)
     }
 
     private suspend fun emitError(e: Throwable) {
         // TODO
     }
-
 
     private fun initializeWatcher(): DirectoryWatcher = DirectoryWatcher.builder()
         .logger(NOPLogger.NOP_LOGGER)
@@ -154,6 +154,3 @@ class RootWatcher(
             }
     }
 }
-
-
-
