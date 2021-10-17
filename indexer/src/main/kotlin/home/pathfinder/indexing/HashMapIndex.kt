@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.supervisorScope
@@ -23,6 +24,14 @@ class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermData>, Act
 
     override suspend fun updateDocument(name: DocumentName, terms: Flow<Posting<TermData>>) {
         indexOrchestrator.updateMailbox.send(UpdateDocumentMessage(name, terms))
+    }
+
+    override suspend fun removeDocument(name: DocumentName) {
+        indexOrchestrator.updateMailbox.send(UpdateDocumentMessage(name, flow {}))
+    }
+
+    override suspend fun setSearchLockStatus(status: Boolean) {
+        indexOrchestrator.searchLockUpdates.send(status)
     }
 
     override suspend fun searchExact(term: DocumentName): Flow<SearchResultEntry<TermData>> =
@@ -97,11 +106,13 @@ class IndexOrchestrator<TermData : Any>(
 ) : Actor {
     val searchMailbox = Channel<SearchExactMessage<TermData>>()
     val updateMailbox = Channel<UpdateDocumentMessage<TermData>>()
+    val searchLockUpdates = Channel<Boolean>()
 
     private val stateUpdateMutex = Mutex()
 
     private var runningSearches = 0
     private var searchFinished = Channel<Unit>()
+
 
     private val runningUpdates = mutableMapOf<DocumentName, SendChannel<Unit>>()
     private val scheduledUpdates = mutableMapOf<DocumentName, UpdateDocumentMessage<TermData>>()
@@ -109,12 +120,18 @@ class IndexOrchestrator<TermData : Any>(
     private val runUpdate = Channel<Pair<UpdateDocumentMessage<TermData>, ReceiveChannel<Unit>>>()
     private val updateFinished = Channel<DocumentName>()
 
+    private var searchLocked = false
+
     override suspend fun go(scope: CoroutineScope): Job = scope.launch {
         try {
             repeat(updateWorkersCount) { launchUpdateWorker() }
 
             while (true) {
                 select<Unit> {
+                    searchLockUpdates.onReceive { v ->
+                        searchLocked = v
+                    }
+
                     searchFinished.onReceive {
 //                        println("received searchFinished")
                         handleSearchFinished()
@@ -130,7 +147,7 @@ class IndexOrchestrator<TermData : Any>(
                         handleUpdateRequest(msg)
                     }
 
-                    if (runningUpdates.isEmpty() && scheduledUpdates.isEmpty()) {
+                    if (!searchLocked && runningUpdates.isEmpty() && scheduledUpdates.isEmpty()) {
                         searchMailbox.onReceive { msg ->
 //                            println("received $msg")
                             handleSearchRequest(msg)
@@ -149,7 +166,7 @@ class IndexOrchestrator<TermData : Any>(
     }
 
     private suspend fun handleUpdateRequest(msg: UpdateDocumentMessage<TermData>) {
-        runningUpdates[msg.documentName]?.send(Unit)
+        runningUpdates[msg.documentName]?.send(Unit) // cancel running
         scheduledUpdates[msg.documentName] = msg
         if (runningSearches == 0) sendScheduledUpdates()
     }

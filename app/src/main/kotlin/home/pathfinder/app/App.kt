@@ -1,42 +1,38 @@
 package home.pathfinder.app
 
-import home.pathfinder.indexing.FileIndexer
+import home.pathfinder.indexing.FileIndexerImpl
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlin.system.measureTimeMillis
 
 fun main() {
-    // TODO: convert to test
     runBlocking {
 
-        val fileIndexer = FileIndexer(listOf(""".*/\.git/.*""", """.*/build/.*""", """.*/gradle/.*"""))
+        val fileIndexer = FileIndexerImpl()
 
         launch { fileIndexer.go(this) }
 
-        fileIndexer.add("indexer/src")
-
-        println("here")
-        val startTime = measureTimeMillis {
-            delay(100)
-            println(fileIndexer.searchExact("override").toList().size)
+        launch {
+            fileIndexer.updateContentRoots(setOf("indexer/src/main"))
+            fileIndexer.searchExact("override").collect { println(it) }
         }
-
-        println("started in $startTime")
 
         launch(Dispatchers.IO) {
             while (true) {
-                println("enter term")
+                println("enter command")
                 val term = readLine()!!
 
-                if (term == "remove") {
-                    fileIndexer.remove("indexer/src")
-                } else {
-                    fileIndexer.searchExact(term).onEach { println(it) }.collect()
+                val parts = term.split(" ").map { it.trim() }
+                if (parts.size < 2) {
+                    println("Unknown command")
+                    continue
+                }
+
+                when (val cmd = parts[0]) {
+                    "roots" -> fileIndexer.updateContentRoots(parts.subList(1, parts.size).toSet())
+                    "search" -> fileIndexer.searchExact(parts[1]).collect { println(it) }
+                    else -> println("unknown cmd $cmd")
                 }
             }
         }

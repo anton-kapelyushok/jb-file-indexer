@@ -4,7 +4,9 @@ import io.methvin.watcher.DirectoryChangeEvent
 import io.methvin.watcher.DirectoryWatcher
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.selects.select
 import org.slf4j.helpers.NOPLogger
 import java.nio.file.ClosedWatchServiceException
 import java.nio.file.Files
@@ -30,7 +32,7 @@ sealed interface FileEvent {
     data class FileRemoved(val path: String) : FileEvent
 }
 
-class RootWatcher2(
+class RootWatcher(
     root: String,
     private val output: SendChannel<FileEvent>
 ) {
@@ -38,12 +40,9 @@ class RootWatcher2(
     private val root = Paths.get(root).canonicalPath
     private val internalFiles = Channel<Any>()
 
-    private var managedFilesWorker: Job? = null
-    private var watchWorker: Job? = null
-
-    suspend fun go(scope: CoroutineScope, started: Channel<Unit>): Job = scope.launch {
-        managedFilesWorker = launchManagedFilesWorker()
-        watchWorker = launchWatchWorker(started)
+    suspend fun go(scope: CoroutineScope, started: Channel<Unit>, cancel: ReceiveChannel<Unit>): Job = scope.launch {
+        launchManagedFilesWorker()
+        launchWatchWorker(started, cancel)
     }
 
     private fun CoroutineScope.launchManagedFilesWorker() = launch {
@@ -61,53 +60,59 @@ class RootWatcher2(
                     }
                 }
             } else if (event == "removeall") {
-                println(files)
-                files.forEach { output.send(FileEvent.FileRemoved(it)) }
+                files.forEach {
+//                    println("remove $it")
+                    output.send(FileEvent.FileRemoved(it))
+                }
                 files.clear()
             }
         }
     }
 
-    private fun CoroutineScope.launchWatchWorker(started: SendChannel<Unit>) = launch(Dispatchers.IO) {
-        var watcher: DirectoryWatcher? = null
-        try {
-            watcher = initializeWatcher()
-            emitInitialDirectoryStructure()
-            started.send(Unit)
-            launch {
+    private fun CoroutineScope.launchWatchWorker(started: SendChannel<Unit>, cancel: ReceiveChannel<Unit>) =
+        launch {
+            val job = launch(Dispatchers.IO) {
+                var watcher: DirectoryWatcher? = null
                 try {
-                    watcher.watch()
-                } catch (e: ClosedWatchServiceException) {
-                    // ignore
+                    watcher = initializeWatcher()
+                    yield()
+                    emitInitialDirectoryStructure()
+                    started.send(Unit)
+                    launch {
+                        try {
+                            watcher.watch()
+                        } catch (e: ClosedWatchServiceException) {
+                            // ignore
+                        }
+                    }
+                    awaitCancellation()
+                } catch (e: Throwable) {
+                    if (e !is CancellationException) emitError(e)
+                } finally {
+                    watcher?.close()
                 }
             }
-            awaitCancellation()
-        } catch (e: Throwable) {
-            if (e !is CancellationException) emitError(e)
-        } finally {
-            watcher?.close()
+
+            select<Unit> {
+                job.onJoin {}
+                cancel.onReceive {
+                    job.cancel()
+                    job.join()
+                }
+            }
+
+            // TODO
+            internalFiles.send("removeall")
+            internalFiles.close()
         }
-    }
-
-    suspend fun shutdown(scope: CoroutineScope) {
-        watchWorker?.cancel()
-        watchWorker?.join()
-        internalFiles.send("removeall")
-        internalFiles.close()
-    }
-
-    suspend fun restart(scope: CoroutineScope, started: SendChannel<Unit>) {
-        watchWorker?.cancel()
-        watchWorker?.join()
-        internalFiles.send("removeall")
-        watchWorker = scope.launchWatchWorker(started)
-    }
 
     private suspend fun emitFileAdded(path: String) {
+//        println("add $path")
         internalFiles.send(FileEvent.FileUpdated(path))
     }
 
     private suspend fun emitFileRemoved(path: String) {
+//        println("remove $path")
         internalFiles.send(FileEvent.FileRemoved(path))
     }
 

@@ -7,6 +7,8 @@ typealias DocumentName = String
 
 interface Index<TermData : Any> {
     suspend fun updateDocument(name: DocumentName, terms: Flow<Posting<TermData>>)
+    suspend fun removeDocument(name: DocumentName)
+    suspend fun setSearchLockStatus(status: Boolean)
 }
 
 interface SearchExact<TermData : Any> {
