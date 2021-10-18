@@ -22,14 +22,10 @@ fun main() {
                 val term = readLine()!!
 
                 val parts = term.split(" ").map { it.trim() }
-                if (parts.size < 2) {
-                    println("Unknown command")
-                    continue
-                }
 
                 when (val cmd = parts[0]) {
-                    "roots" -> fileIndexer.updateContentRoots(parts.subList(1, parts.size).toSet())
-                    "search" -> {
+                    "watch" -> fileIndexer.updateContentRoots(parts.subList(1, parts.size).toSet())
+                    "find" -> {
                         launch {
                             val (value, duration) = measureTimedValue {
                                 fileIndexer.searchExact(parts[1]).toList()

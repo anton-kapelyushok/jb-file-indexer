@@ -5,8 +5,8 @@ import io.methvin.watcher.DirectoryWatcher
 import io.methvin.watcher.hashing.FileHash
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.Channel.Factory.CONFLATED
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.selects.select
 import org.slf4j.helpers.NOPLogger
 import java.nio.file.ClosedWatchServiceException
@@ -29,12 +29,20 @@ sealed interface RootWatcherEvent {
 
 class RootWatcher(
     root: String,
-    private val output: SendChannel<FileEvent>,
-    private val started: SendChannel<Unit>,
-    private val overflow: SendChannel<Unit>,
-    private val error: SendChannel<Throwable>,
-    private val cancel: ReceiveChannel<Unit>,
+    private val cancel: CompletableDeferred<Unit>,
 ) : Actor {
+
+    val fileEvents: ReceiveChannel<FileEvent> get() = myFileEvents
+    val started: ReceiveChannel<Unit> get() = myStarted
+    val overflow: ReceiveChannel<Unit> get() = myOverflow
+    val error: ReceiveChannel<Throwable> get() = myError
+    val rootRemoved: ReceiveChannel<Unit> get() = myRootRemoved
+
+    private val myFileEvents = Channel<FileEvent>()
+    private val myStarted = Channel<Unit>(CONFLATED)
+    private val myOverflow = Channel<Unit>(CONFLATED)
+    private val myError = Channel<Throwable>(CONFLATED)
+    private val myRootRemoved = Channel<Unit>(CONFLATED)
 
     private val root = Paths.get(root).canonicalPath
     private val internalEvents = Channel<RootWatcherEvent>()
@@ -54,18 +62,18 @@ class RootWatcher(
                     when (val fileEvent = event.event) {
                         is FileEvent.FileUpdated -> {
                             files += fileEvent.path
-                            output.send(fileEvent)
+                            myFileEvents.send(fileEvent)
                         }
                         is FileEvent.FileRemoved -> {
                             files -= fileEvent.path
-                            output.send(fileEvent)
+                            myFileEvents.send(fileEvent)
                         }
                     }
                 }
                 RootWatcherEvent.RemoveAll -> {
                     files.forEach {
 //                        println("remove $it")
-                        output.send(FileEvent.FileRemoved(it))
+                        myFileEvents.send(FileEvent.FileRemoved(it))
                     }
                     files.clear()
                 }
@@ -81,7 +89,7 @@ class RootWatcher(
                     watcher = runInterruptible { initializeWatcher() }
                     yield()
                     runInterruptible { emitInitialDirectoryStructure() }
-                    started.send(Unit)
+                    myStarted.send(Unit)
                     runInterruptible {
                         try {
                             println("watching")
@@ -92,24 +100,21 @@ class RootWatcher(
                         }
                     }
                 } catch (e: Throwable) {
-                    println("TODO $isActive $e")
                     if (isActive) emitError(e)
                 } finally {
                     watcher?.close()
                 }
-                awaitCancellation()
             }
 
             select<Unit> {
+                cancel.onAwait { job.cancel() }
                 job.onJoin {}
-                cancel.onReceive {
-                    job.cancel()
-                    job.join()
-                }
             }
 
             internalEvents.send(RootWatcherEvent.RemoveAll)
             internalEvents.close()
+
+            cancel.await()
         }
 
     private suspend fun emitFileAdded(path: String) {
@@ -123,11 +128,15 @@ class RootWatcher(
     }
 
     private suspend fun emitOverflow() {
-        overflow.send(Unit)
+        myOverflow.send(Unit)
     }
 
     private suspend fun emitError(e: Throwable) {
-        error.send(e)
+        myError.send(e)
+    }
+
+    private suspend fun emitRootRemoved() {
+        myRootRemoved.send(Unit)
     }
 
     private fun initializeWatcher(): DirectoryWatcher = DirectoryWatcher.builder()
@@ -143,12 +152,21 @@ class RootWatcher(
         .listener { event ->
             runBlocking {
                 val path = event.path().canonicalPath
+                val isRegularFile = !event.isDirectory
                 println(event)
                 @Suppress("WHEN_ENUM_CAN_BE_NULL_IN_JAVA")
                 when (event.eventType()) {
-                    DirectoryChangeEvent.EventType.CREATE -> emitFileAdded(path)
-                    DirectoryChangeEvent.EventType.MODIFY -> emitFileAdded(path)
-                    DirectoryChangeEvent.EventType.DELETE -> emitFileRemoved(path)
+                    DirectoryChangeEvent.EventType.CREATE -> {
+                        if (isRegularFile) emitFileAdded(path)
+                    }
+                    DirectoryChangeEvent.EventType.MODIFY -> {
+                        if (isRegularFile) emitFileAdded(path)
+                    }
+                    DirectoryChangeEvent.EventType.DELETE -> {
+                        println(isRegularFile)
+                        if (isRegularFile) emitFileRemoved(path)
+                        if (path == root) emitRootRemoved()
+                    }
                     DirectoryChangeEvent.EventType.OVERFLOW -> emitOverflow()
                 }
             }
