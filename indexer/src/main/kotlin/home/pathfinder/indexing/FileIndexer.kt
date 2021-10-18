@@ -37,34 +37,35 @@ sealed interface RootWatcherState {
     object Canceling : RootWatcherState
 }
 
-sealed interface UpdateRequest {
-    data class UpdateRoots(val roots: Set<String>) : UpdateRequest
-    data class WatcherOverflown(val path: String) : UpdateRequest
-    data class RootInitialized(val path: String) : UpdateRequest
-    data class WatcherFinished(val path: String) : UpdateRequest
-}
+sealed interface IndexerEvent {
+    data class UpdateRoots(val roots: Set<String>) : IndexerEvent
+    data class WatcherOverflown(val path: String) : IndexerEvent
+    data class RootInitialized(val path: String) : IndexerEvent
+    data class WatcherFinished(val path: String) : IndexerEvent
+    sealed interface Search : IndexerEvent {
+        val ready: Channel<Unit>
 
-sealed interface SearchRequest {
-    val ready: Channel<Unit>
+        data class Exact(val term: String, override val ready: Channel<Unit>) : Search
+    }
 
-    data class SearchExact(val term: String, override val ready: Channel<Unit>) : SearchRequest
 }
 
 class FileIndexerImpl : FileIndexer {
 
+    private val index = HashMapIndex<Int>()
+
     private val rootWatcherStates = mutableMapOf<String, RootWatcherState>()
     private var watchedRoots = mutableSetOf<String>()
-    private val updateRequests = Channel<UpdateRequest>()
-    private val searchRequests = Channel<SearchRequest>(UNLIMITED)
-    private val fileUpdateChannel = Channel<FileEvent>(UNLIMITED)
-    private val index = HashMapIndex<Int>()
+
+    private val indexerEvents = Channel<IndexerEvent>()
+    private val fileEvents = Channel<FileEvent>(UNLIMITED)
 
     override suspend fun go(scope: CoroutineScope) {
         scope.launch {
             launch { index.go(this) }
 
             launch {
-                for (msg in fileUpdateChannel) {
+                for (msg in fileEvents) {
                     when (msg) {
                         is FileEvent.FileRemoved -> index.removeDocument(msg.path)
                         is FileEvent.FileUpdated -> index.updateDocument(msg.path, readPath(msg.path))
@@ -77,40 +78,52 @@ class FileIndexerImpl : FileIndexer {
 
                 while (true) {
                     select<Unit> {
-                        updateRequests.onReceive { request ->
+                        indexerEvents.onReceive { request ->
                             println("Received updateRequests $request")
                             when (request) {
-                                is UpdateRequest.UpdateRoots -> {
+                                is IndexerEvent.UpdateRoots -> {
                                     val watchersToRemove = watchedRoots - request.roots
                                     watchedRoots = request.roots.toMutableSet()
                                     watchersToRemove.forEach { cancelWatcher(it) }
                                 }
-                                is UpdateRequest.RootInitialized -> {
+                                is IndexerEvent.RootInitialized -> {
                                     when (val rootState = rootWatcherStates[request.path]) {
                                         is RootWatcherState.Initializing -> {
                                             rootWatcherStates[request.path] = RootWatcherState.Running(rootState.cancel)
                                         }
                                     }
                                 }
-                                is UpdateRequest.WatcherOverflown -> {
+                                is IndexerEvent.WatcherOverflown -> {
                                     cancelWatcher(request.path)
                                 }
-                                is UpdateRequest.WatcherFinished -> {
+                                is IndexerEvent.WatcherFinished -> {
                                     rootWatcherStates -= request.path
+                                }
+                                is IndexerEvent.Search.Exact -> {
+                                    request.ready.send(Unit)
                                 }
                             }
 
                             launchMissingWatchers(workerScope)
                             updateIndexLockingStatus()
                         }
-
-                        searchRequests.onReceive { request ->
-                            request.ready.send(Unit)
-                        }
                     }
                 }
             }
         }
+    }
+
+    override val stateFlow: StateFlow<FileIndexerState> get() = null!!
+
+    override suspend fun updateContentRoots(newRoots: Set<String>) {
+        indexerEvents.send(IndexerEvent.UpdateRoots(newRoots))
+    }
+
+    override suspend fun searchExact(term: String): Flow<SearchResultEntry<Int>> = flow {
+        val ready = Channel<Unit>(CONFLATED)
+        indexerEvents.send(IndexerEvent.Search.Exact(term, ready))
+        ready.receive()
+        index.searchExact(term).onEach { emit(it) }.collect()
     }
 
     private suspend fun cancelWatcher(root: String) {
@@ -119,22 +132,12 @@ class FileIndexerImpl : FileIndexer {
                 rootState.cancel.send(Unit)
                 rootWatcherStates[root] = RootWatcherState.Canceling
             }
+
             is RootWatcherState.Running -> {
                 rootState.cancel.send(Unit)
                 rootWatcherStates[root] = RootWatcherState.Canceling
             }
         }
-    }
-
-    override suspend fun updateContentRoots(newRoots: Set<String>) {
-        updateRequests.send(UpdateRequest.UpdateRoots(newRoots))
-    }
-
-    override suspend fun searchExact(term: String): Flow<SearchResultEntry<Int>> = flow {
-        val ready = Channel<Unit>(CONFLATED)
-        searchRequests.send(SearchRequest.SearchExact(term, ready))
-        ready.receive()
-        index.searchExact(term).onEach { emit(it) }.collect()
     }
 
     private suspend fun launchMissingWatchers(scope: CoroutineScope) {
@@ -157,7 +160,7 @@ class FileIndexerImpl : FileIndexer {
         val cancel = Channel<Unit>(CONFLATED)
         val started = Channel<Unit>(CONFLATED)
 
-        val watcher = RootWatcher(path, fileUpdateChannel, started, overflow, cancel)
+        val watcher = RootWatcher(path, fileEvents, started, overflow, cancel)
 
         rootWatcherStates[path] = RootWatcherState.Initializing(cancel)
 
@@ -168,21 +171,19 @@ class FileIndexerImpl : FileIndexer {
                 while (running) {
                     select<Unit> {
                         started.onReceive {
-                            updateRequests.send(UpdateRequest.RootInitialized(path))
+                            indexerEvents.send(IndexerEvent.RootInitialized(path))
                         }
                         overflow.onReceive {
-                            updateRequests.send(UpdateRequest.WatcherOverflown(path))
+                            indexerEvents.send(IndexerEvent.WatcherOverflown(path))
                         }
                         job.onJoin { running = false }
                     }
                 }
             } finally {
-                updateRequests.send(UpdateRequest.WatcherFinished(path))
+                indexerEvents.send(IndexerEvent.WatcherFinished(path))
             }
         }
     }
-
-    override val stateFlow: StateFlow<FileIndexerState> get() = null!!
 
     private fun readPath(path: String) = flow {
         try {
@@ -209,4 +210,3 @@ class FileIndexerImpl : FileIndexer {
         index.setSearchLockStatus(status = !searchIsAllowed)
     }
 }
-
