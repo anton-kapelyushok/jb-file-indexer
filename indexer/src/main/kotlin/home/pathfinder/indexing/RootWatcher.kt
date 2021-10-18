@@ -2,6 +2,7 @@ package home.pathfinder.indexing
 
 import io.methvin.watcher.DirectoryChangeEvent
 import io.methvin.watcher.DirectoryWatcher
+import io.methvin.watcher.hashing.FileHash
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -12,6 +13,7 @@ import java.nio.file.ClosedWatchServiceException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import kotlin.random.Random
 
 private val Path.canonicalPath: String get() = toFile().canonicalPath
 
@@ -82,7 +84,9 @@ class RootWatcher(
                     started.send(Unit)
                     runInterruptible {
                         try {
+                            println("watching")
                             watcher.watch()
+                            println("after watch")
                         } catch (e: ClosedWatchServiceException) {
                             // ignore
                         }
@@ -134,11 +138,12 @@ class RootWatcher(
             if (Thread.interrupted()) {
                 throw InterruptedException()
             }
-            null
+            FileHash.fromBytes(Random.Default.nextBytes(16))
         }
         .listener { event ->
             runBlocking {
                 val path = event.path().canonicalPath
+                println(event)
                 @Suppress("WHEN_ENUM_CAN_BE_NULL_IN_JAVA")
                 when (event.eventType()) {
                     DirectoryChangeEvent.EventType.CREATE -> emitFileAdded(path)
