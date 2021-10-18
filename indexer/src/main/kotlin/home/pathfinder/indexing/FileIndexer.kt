@@ -32,9 +32,14 @@ interface FileIndexer {
 typealias FileIndexerState = Any
 
 sealed interface RootWatcherState {
-    data class Initializing(val cancel: Channel<Unit>) : RootWatcherState
-    data class Running(val cancel: Channel<Unit>) : RootWatcherState
+    data class Initializing(override val cancel: Channel<Unit>) : RootWatcherState, Cancelable
+    data class Running(override val cancel: Channel<Unit>) : RootWatcherState, Cancelable
+    data class Failed(override val cancel: Channel<Unit>, val error: Throwable) : RootWatcherState, Cancelable
     object Canceling : RootWatcherState
+
+    interface Cancelable {
+        val cancel: Channel<Unit>
+    }
 }
 
 sealed interface IndexerEvent {
@@ -42,12 +47,12 @@ sealed interface IndexerEvent {
     data class WatcherOverflown(val path: String) : IndexerEvent
     data class RootInitialized(val path: String) : IndexerEvent
     data class WatcherFinished(val path: String) : IndexerEvent
+    data class WatcherFailed(val path: String, val exception: Throwable) : IndexerEvent
     sealed interface Search : IndexerEvent {
         val ready: Channel<Unit>
 
         data class Exact(val term: String, override val ready: Channel<Unit>) : Search
     }
-
 }
 
 class FileIndexerImpl : FileIndexer {
@@ -82,9 +87,14 @@ class FileIndexerImpl : FileIndexer {
                             println("Received updateRequests $request")
                             when (request) {
                                 is IndexerEvent.UpdateRoots -> {
-                                    val watchersToRemove = watchedRoots - request.roots
+                                    val failedRoots =
+                                        rootWatcherStates.filter { (_, v) -> v is RootWatcherState.Failed }
+                                            .map { (k, _) -> k }
+
+                                    val watchersToCancel = watchedRoots - request.roots + failedRoots
+
                                     watchedRoots = request.roots.toMutableSet()
-                                    watchersToRemove.forEach { cancelWatcher(it) }
+                                    watchersToCancel.forEach { cancelWatcher(it) }
                                 }
                                 is IndexerEvent.RootInitialized -> {
                                     when (val rootState = rootWatcherStates[request.path]) {
@@ -102,10 +112,19 @@ class FileIndexerImpl : FileIndexer {
                                 is IndexerEvent.Search.Exact -> {
                                     request.ready.send(Unit)
                                 }
+                                is IndexerEvent.WatcherFailed -> {
+                                    when (val rootState = rootWatcherStates[request.path]) {
+                                        is RootWatcherState.Cancelable -> {
+                                            rootWatcherStates[request.path] =
+                                                RootWatcherState.Failed(rootState.cancel, request.exception)
+                                        }
+                                    }
+                                }
                             }
 
                             launchMissingWatchers(workerScope)
                             updateIndexLockingStatus()
+                            println("$rootWatcherStates")
                         }
                     }
                 }
@@ -128,12 +147,7 @@ class FileIndexerImpl : FileIndexer {
 
     private suspend fun cancelWatcher(root: String) {
         when (val rootState = rootWatcherStates[root]) {
-            is RootWatcherState.Initializing -> {
-                rootState.cancel.send(Unit)
-                rootWatcherStates[root] = RootWatcherState.Canceling
-            }
-
-            is RootWatcherState.Running -> {
+            is RootWatcherState.Cancelable -> {
                 rootState.cancel.send(Unit)
                 rootWatcherStates[root] = RootWatcherState.Canceling
             }
@@ -159,8 +173,16 @@ class FileIndexerImpl : FileIndexer {
         val overflow = Channel<Unit>(CONFLATED)
         val cancel = Channel<Unit>(CONFLATED)
         val started = Channel<Unit>(CONFLATED)
+        val error = Channel<Throwable>(CONFLATED)
 
-        val watcher = RootWatcher(path, fileEvents, started, overflow, cancel)
+        val watcher = RootWatcher(
+            root = path,
+            output = fileEvents,
+            started = started,
+            overflow = overflow,
+            error = error,
+            cancel = cancel
+        )
 
         rootWatcherStates[path] = RootWatcherState.Initializing(cancel)
 
@@ -175,6 +197,9 @@ class FileIndexerImpl : FileIndexer {
                         }
                         overflow.onReceive {
                             indexerEvents.send(IndexerEvent.WatcherOverflown(path))
+                        }
+                        error.onReceive {
+                            indexerEvents.send(IndexerEvent.WatcherFailed(path, it))
                         }
                         job.onJoin { running = false }
                     }

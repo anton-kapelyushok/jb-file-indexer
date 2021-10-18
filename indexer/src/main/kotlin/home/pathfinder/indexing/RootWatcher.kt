@@ -30,7 +30,8 @@ class RootWatcher(
     private val output: SendChannel<FileEvent>,
     private val started: SendChannel<Unit>,
     private val overflow: SendChannel<Unit>,
-    private val cancel: ReceiveChannel<Unit>
+    private val error: SendChannel<Throwable>,
+    private val cancel: ReceiveChannel<Unit>,
 ) : Actor {
 
     private val root = Paths.get(root).canonicalPath
@@ -79,26 +80,20 @@ class RootWatcher(
                     yield()
                     runInterruptible { emitInitialDirectoryStructure() }
                     started.send(Unit)
-                    launch {
+                    runInterruptible {
                         try {
-                            runInterruptible { watcher.watch() }
+                            watcher.watch()
                         } catch (e: ClosedWatchServiceException) {
                             // ignore
-                        } catch (e: Throwable) {
-                            // TODO
-                            println("first $e")
-                            throw e
                         }
                     }
-                    awaitCancellation()
                 } catch (e: Throwable) {
-                    if (e !is CancellationException) emitError(e)
-                    // TODO
-                    println("second $e")
-                    awaitCancellation()
+                    println("TODO $isActive $e")
+                    if (isActive) emitError(e)
                 } finally {
                     watcher?.close()
                 }
+                awaitCancellation()
             }
 
             select<Unit> {
@@ -128,7 +123,7 @@ class RootWatcher(
     }
 
     private suspend fun emitError(e: Throwable) {
-        // TODO
+        error.send(e)
     }
 
     private fun initializeWatcher(): DirectoryWatcher = DirectoryWatcher.builder()
