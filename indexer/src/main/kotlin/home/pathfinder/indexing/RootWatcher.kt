@@ -134,7 +134,13 @@ class RootWatcher(
     private fun initializeWatcher(): DirectoryWatcher = DirectoryWatcher.builder()
         .logger(NOPLogger.NOP_LOGGER)
         .path(Paths.get(root))
-        .fileHashing(false)
+        .fileHasher {
+            // A hack to fast cancel watcher.build()
+            if (Thread.interrupted()) {
+                throw InterruptedException()
+            }
+            null
+        }
         .listener { event ->
             runBlocking {
                 val path = event.path().canonicalPath
@@ -153,7 +159,6 @@ class RootWatcher(
         Files.walk(Paths.get(root))
             .use { stream ->
                 stream.filter(Files::isRegularFile)
-                    
                     .forEach {
                         runBlocking {
                             emitFileAdded(it.canonicalPath)
