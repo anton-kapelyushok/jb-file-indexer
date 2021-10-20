@@ -25,10 +25,17 @@ interface FileIndexer {
     /**
      * Contains information about index state and errors
      */
-    val stateFlow: StateFlow<Any>
+    val state: StateFlow<FileIndexerStatusInfo>
 }
 
-typealias FileIndexerState = Any
+data class FileIndexerStatusInfo(
+    val indexInfo: IndexStatusInfo,
+    val rootsState: Map<String, String>
+) {
+    companion object {
+        fun empty() = FileIndexerStatusInfo(IndexStatusInfo.empty(), emptyMap())
+    }
+}
 
 sealed interface RootWatcherState {
 
@@ -154,13 +161,24 @@ class FileIndexerImpl : FileIndexer {
 
     override suspend fun go(scope: CoroutineScope) {
         scope.launch {
+
+            launch {
+                combine(index.state, rootsState) { idx, roots ->
+                    FileIndexerStatusInfo(
+                        idx,
+                        roots
+                    )
+                }.collect {
+                    state.value = it
+                }
+            }
+
             launch { index.go(this) }
 
             launch {
                 val workerScope = this
 
                 for (request in indexerEvents) {
-                    println("Received updateRequests $request")
                     when (request) {
                         is IndexerEvent.UpdateRoots -> {
                             val rootRemoveRequests = rootWatcherStates.keys - request.roots
@@ -172,6 +190,7 @@ class FileIndexerImpl : FileIndexer {
 
                             synchronizeWatchers(workerScope)
                             updateSearchLock()
+                            updateState()
                         }
                         is WatcherEvent -> {
                             rootWatcherStates.computeIfPresent(request.path) { _, state ->
@@ -180,6 +199,7 @@ class FileIndexerImpl : FileIndexer {
 
                             synchronizeWatchers(workerScope)
                             updateSearchLock()
+                            updateState()
                         }
                         is IndexerEvent.Search.Exact -> {
                             request.ready.complete(Unit)
@@ -191,13 +211,14 @@ class FileIndexerImpl : FileIndexer {
                             index.removeDocument(request.path)
                         }
                     }
-                    println(rootWatcherStates)
                 }
             }
         }
     }
 
-    override val stateFlow: StateFlow<FileIndexerState> get() = null!!
+    private val rootsState = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    override val state = MutableStateFlow(FileIndexerStatusInfo.empty())
 
     override suspend fun updateContentRoots(newRoots: Set<String>) {
         indexerEvents.send(IndexerEvent.UpdateRoots(newRoots))
@@ -228,8 +249,6 @@ class FileIndexerImpl : FileIndexer {
 
     private suspend fun launchWatcher(scope: CoroutineScope, path: String) {
         assert(rootWatcherStates[path] == null)
-
-        println("Starting $path watcher")
 
         val cancel = CompletableDeferred<Unit>()
 
@@ -272,6 +291,10 @@ class FileIndexerImpl : FileIndexer {
                 indexerEvents.send(IndexerEvent.WatcherFinished(path))
             }
         }
+    }
+
+    private suspend fun updateState() {
+        rootsState.value = rootWatcherStates.map { (path, state) -> path to state.toString() }.toMap()
     }
 
     private fun readPath(path: String) = flow {

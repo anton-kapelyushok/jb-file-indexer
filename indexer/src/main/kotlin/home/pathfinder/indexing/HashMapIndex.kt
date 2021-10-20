@@ -7,6 +7,7 @@ import kotlinx.coroutines.channels.Channel.Factory.CONFLATED
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
@@ -38,6 +39,8 @@ class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermData>, Act
         flowFromActor(indexOrchestrator.searchMailbox) { cancel, data -> SearchExactMessage(term, data, cancel) }
 
     override suspend fun go(scope: CoroutineScope) = indexOrchestrator.go(scope)
+
+    override val state = indexOrchestrator.state
 }
 
 class IndexState<TermData : Any> {
@@ -69,6 +72,8 @@ class IndexState<TermData : Any> {
             }
         }
     }
+
+    fun documentsCount() = forwardIndex.size
 }
 
 data class UpdateDocumentMessage<TermData : Any>(
@@ -105,7 +110,7 @@ class IndexOrchestrator<TermData : Any>(
     private val stateUpdateBatchSize: Int = 128,
 ) : Actor {
     val searchMailbox = Channel<SearchExactMessage<TermData>>()
-    val updateMailbox = Channel<UpdateDocumentMessage<TermData>>(Int.MAX_VALUE)
+    val updateMailbox = Channel<UpdateDocumentMessage<TermData>>()
     val searchLockUpdates = Channel<Boolean>()
 
     private val stateUpdateMutex = Mutex()
@@ -119,7 +124,12 @@ class IndexOrchestrator<TermData : Any>(
     private val runUpdate = Channel<Pair<UpdateDocumentMessage<TermData>, ReceiveChannel<Unit>>>()
     private val updateFinished = Channel<DocumentName>()
 
+    private val updateFailures = Channel<Pair<DocumentName, Throwable>>()
+    private val updateFailuresState = mutableMapOf<DocumentName, Throwable>()
+
     private var searchLocked = false
+
+    val state = MutableStateFlow(IndexStatusInfo.empty())
 
     override suspend fun go(scope: CoroutineScope): Job = scope.launch {
         try {
@@ -134,6 +144,12 @@ class IndexOrchestrator<TermData : Any>(
                     searchFinished.onReceive {
 //                        println("received searchFinished")
                         handleSearchFinished()
+                    }
+
+                    updateFailures.onReceive { (documentName, exception) ->
+                        if (documentName !in scheduledUpdates) {
+                            updateFailuresState[documentName] = exception
+                        }
                     }
 
                     updateFinished.onReceive { documentName ->
@@ -153,6 +169,8 @@ class IndexOrchestrator<TermData : Any>(
                         }
                     }
                 }
+
+                publishState()
             }
         } finally {
             searchMailbox.cancel()
@@ -165,6 +183,8 @@ class IndexOrchestrator<TermData : Any>(
     }
 
     private suspend fun handleUpdateRequest(msg: UpdateDocumentMessage<TermData>) {
+        updateFailuresState -= msg.documentName
+
         runningUpdates[msg.documentName]?.send(Unit) // cancel running
         scheduledUpdates[msg.documentName] = msg
         if (runningSearches == 0) sendScheduledUpdates()
@@ -214,19 +234,24 @@ class IndexOrchestrator<TermData : Any>(
 
     private fun CoroutineScope.launchUpdateWorker() = launch {
         suspend fun performUpdate(documentName: DocumentName, data: Flow<Posting<TermData>>) {
-            val buffer = mutableListOf<Posting<TermData>>()
+            try {
+                val buffer = mutableListOf<Posting<TermData>>()
 
-            stateUpdateMutex.withLock { indexState.removeDocument(documentName) }
+                stateUpdateMutex.withLock { indexState.removeDocument(documentName) }
 
-            data.collect {
-                buffer.add(it)
+                data.collect {
+                    buffer.add(it)
 
-                if (buffer.size == stateUpdateBatchSize) {
-                    stateUpdateMutex.withLock { indexState.addTerms(documentName, buffer.toList()) }
-                    buffer.clear()
+                    if (buffer.size == stateUpdateBatchSize) {
+                        stateUpdateMutex.withLock { indexState.addTerms(documentName, buffer.toList()) }
+                        buffer.clear()
+                    }
+
+                    stateUpdateMutex.withLock { indexState.addTerms(documentName, buffer) }
                 }
-
-                stateUpdateMutex.withLock { indexState.addTerms(documentName, buffer) }
+            } catch (e: Throwable) {
+                stateUpdateMutex.withLock { indexState.removeDocument(documentName) }
+                throw e
             }
         }
 
@@ -234,7 +259,11 @@ class IndexOrchestrator<TermData : Any>(
             try {
                 supervisorScope {
                     val job = launch {
-                        performUpdate(msg.documentName, msg.flow)
+                        try {
+                            performUpdate(msg.documentName, msg.flow)
+                        } catch (e: Throwable) {
+                            updateFailures.send(msg.documentName to e)
+                        }
                     }
 
                     select<Unit> {
@@ -249,5 +278,15 @@ class IndexOrchestrator<TermData : Any>(
                 updateFinished.send(msg.documentName)
             }
         }
+    }
+
+    private fun publishState() {
+        state.value = IndexStatusInfo(
+            searchLocked = searchLocked,
+            runningUpdates = runningUpdates.size,
+            pendingUpdates = scheduledUpdates.size,
+            indexedDocuments = indexState.documentsCount(),
+            errors = updateFailuresState.toMap(),
+        )
     }
 }

@@ -34,6 +34,9 @@ fun main() {
                             println("Found in ${duration.inWholeMilliseconds}ms")
                         }
                     }
+                    "status" -> {
+                        println(fileIndexer.state.value)
+                    }
                     else -> println("unknown cmd $cmd")
                 }
             }
