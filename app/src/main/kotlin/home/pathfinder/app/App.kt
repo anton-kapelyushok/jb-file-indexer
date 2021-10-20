@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlin.system.measureTimeMillis
 import kotlin.time.ExperimentalTime
 import kotlin.time.measureTimedValue
 
@@ -17,7 +18,12 @@ fun main() {
 //        }
         val fileIndexer = fileIndexer()
 
-        launch { fileIndexer.go(this) }
+        launch(Dispatchers.Default) { fileIndexer.go(this) }
+
+        fileIndexer.updateContentRoots(setOf("src/indexer"))
+        val millis = measureTimeMillis { println(fileIndexer.searchExact("override").toList()) }
+        println("Started in $millis")
+
 
         launch(Dispatchers.IO) {
             while (true) {
@@ -31,7 +37,12 @@ fun main() {
                     "find" -> {
                         launch {
                             val (value, duration) = measureTimedValue {
-                                fileIndexer.searchExact(parts[1]).toList()
+                                if (parts.size != 2) return@measureTimedValue emptyList<Any>()
+                                try {
+                                    fileIndexer.searchExact(parts[1]).toList()
+                                } catch (e: Throwable) {
+                                    println("launch $e")
+                                }
                             }
                             println(value)
                             println("Found in ${duration.inWholeMilliseconds}ms")

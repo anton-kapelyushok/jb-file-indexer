@@ -142,7 +142,6 @@ internal class IndexOrchestrator<TermData : Any>(
                     }
 
                     searchFinished.onReceive {
-//                        println("received searchFinished")
                         handleSearchFinished()
                     }
 
@@ -153,18 +152,15 @@ internal class IndexOrchestrator<TermData : Any>(
                     }
 
                     updateFinished.onReceive { documentName ->
-//                        println("received update finished on$documentName")
                         handleUpdateFinished(documentName)
                     }
 
                     updateMailbox.onReceive { msg ->
-//                        println("received $msg")
                         handleUpdateRequest(msg)
                     }
 
                     if (!searchLocked && runningUpdates.isEmpty() && scheduledUpdates.isEmpty()) {
                         searchMailbox.onReceive { msg ->
-//                            println("received $msg")
                             handleSearchRequest(msg)
                         }
                     }
@@ -225,12 +221,13 @@ internal class IndexOrchestrator<TermData : Any>(
                 handleFlowFromActorMessage(msg) { result ->
                     indexState.searchExact(msg.term, result)
                 }
+            } catch (e: Throwable) {
+                msg.dataChannel.close(e)
             } finally {
                 searchFinished.send(Unit)
             }
         }
     }
-
 
     private fun CoroutineScope.launchUpdateWorker() = launch {
         suspend fun performUpdate(documentName: DocumentName, data: Flow<Posting<TermData>>) {

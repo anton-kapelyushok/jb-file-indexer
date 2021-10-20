@@ -74,7 +74,6 @@ internal class RootWatcher(
                 }
                 RootWatcherEvent.RemoveAll -> {
                     files.forEach {
-//                        println("remove $it")
                         myFileRemoved.send(it)
                     }
                     files.clear()
@@ -94,9 +93,7 @@ internal class RootWatcher(
                     myStarted.send(Unit)
                     runInterruptible {
                         try {
-                            println("watching")
                             watcher.watch()
-                            println("after watch")
                         } catch (e: ClosedWatchServiceException) {
                             // ignore
                         }
@@ -118,12 +115,10 @@ internal class RootWatcher(
         }
 
     private suspend fun emitFileAdded(path: String) {
-//        println("add $path")
         internalEvents.send(RootWatcherEvent.RootWatcherFileEvent(FileEvent.FileUpdated(path)))
     }
 
     private suspend fun emitFileRemoved(path: String) {
-//        println("remove $path")
         internalEvents.send(RootWatcherEvent.RootWatcherFileEvent(FileEvent.FileRemoved(path)))
     }
 
@@ -153,7 +148,6 @@ internal class RootWatcher(
             runBlocking {
                 val path = event.path().canonicalPath
                 val isRegularFile = !event.isDirectory
-                println(event)
                 @Suppress("WHEN_ENUM_CAN_BE_NULL_IN_JAVA")
                 when (event.eventType()) {
                     DirectoryChangeEvent.EventType.CREATE -> {
@@ -163,7 +157,6 @@ internal class RootWatcher(
                         if (isRegularFile) emitFileAdded(path)
                     }
                     DirectoryChangeEvent.EventType.DELETE -> {
-                        println(isRegularFile)
                         if (isRegularFile) emitFileRemoved(path)
                         if (path == root) emitRootRemoved()
                     }

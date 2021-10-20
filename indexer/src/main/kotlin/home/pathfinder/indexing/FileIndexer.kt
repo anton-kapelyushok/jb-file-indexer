@@ -13,6 +13,8 @@ internal sealed interface RootWatcherState {
 
     data class Initializing(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable {
         override val isTerminating: Boolean = false
+        override val isReadyForSearch: Boolean = false
+
         override fun onWatcherEvent(event: WatcherEvent): RootWatcherState {
             return when (event) {
                 is IndexerEvent.WatcherFailed -> Failing(event.exception)
@@ -30,6 +32,7 @@ internal sealed interface RootWatcherState {
 
     data class Running(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable {
         override val isTerminating: Boolean = false
+        override val isReadyForSearch = true
 
         override fun onWatcherEvent(event: WatcherEvent): RootWatcherState {
             return when (event) {
@@ -49,7 +52,8 @@ internal sealed interface RootWatcherState {
     data class Failing(val error: Throwable) : RootWatcherState {
         private var rootRemoveRequested = false
 
-        override val isTerminating: Boolean = true
+        override val isTerminating = true
+        override val isReadyForSearch = false
 
         override fun onWatcherEvent(event: WatcherEvent): RootWatcherState? {
             return when (event) {
@@ -66,6 +70,7 @@ internal sealed interface RootWatcherState {
 
     data class Failed(val error: Throwable) : RootWatcherState {
         override val isTerminating: Boolean = false
+        override val isReadyForSearch = true
 
         override fun onRootRemoveRequested(): RootWatcherState? {
             return null
@@ -74,6 +79,7 @@ internal sealed interface RootWatcherState {
 
     object RootRemoved : RootWatcherState {
         override val isTerminating: Boolean = false
+        override val isReadyForSearch = true
 
         override fun onRootRemoveRequested(): RootWatcherState? {
             return null
@@ -82,6 +88,7 @@ internal sealed interface RootWatcherState {
 
     object Canceling : RootWatcherState {
         override val isTerminating: Boolean = true
+        override val isReadyForSearch = false
 
         override fun onWatcherEvent(event: WatcherEvent): RootWatcherState? {
             return when (event) {
@@ -99,6 +106,7 @@ internal sealed interface RootWatcherState {
     fun onTerminate(): RootWatcherState = this
     fun onWatcherEvent(event: WatcherEvent): RootWatcherState? = this
     fun onRootRemoveRequested(): RootWatcherState? = this
+    val isReadyForSearch: Boolean
 }
 
 
@@ -275,10 +283,11 @@ internal class FileIndexerImpl(
     private fun readPath(path: String) = tokenize(path)
 
     private suspend fun updateSearchLock() {
-        val allWatchersAreRunning = rootWatcherStates.values.all { !it.isTerminating }
+
+        val allWatchersReady = rootWatcherStates.values.all { it.isReadyForSearch }
         val allRootsAreWatched = (watchedRoots - rootWatcherStates.keys).isEmpty()
 
-        val searchIsAllowed = allWatchersAreRunning && allRootsAreWatched
+        val searchIsAllowed = allWatchersReady && allRootsAreWatched
         index.setSearchLockStatus(status = !searchIsAllowed)
     }
 }
