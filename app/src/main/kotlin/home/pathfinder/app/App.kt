@@ -1,6 +1,6 @@
 package home.pathfinder.app
 
-import home.pathfinder.indexing.FileIndexerImpl
+import home.pathfinder.indexing.fileIndexer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -12,7 +12,10 @@ import kotlin.time.measureTimedValue
 fun main() {
     runBlocking {
 
-        val fileIndexer = FileIndexerImpl()
+//        val fileIndexer = fileIndexer { path ->
+//            flow { emit(Posting(path.split("/").last(), 0)) }
+//        }
+        val fileIndexer = fileIndexer()
 
         launch { fileIndexer.go(this) }
 

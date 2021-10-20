@@ -16,7 +16,7 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermData>, Actor {
+internal class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermData> {
 
     private val indexState = IndexState<TermData>()
     private val indexOrchestrator = IndexOrchestrator(
@@ -43,7 +43,7 @@ class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermData>, Act
     override val state = indexOrchestrator.state
 }
 
-class IndexState<TermData : Any> {
+internal class IndexState<TermData : Any> {
     private val forwardIndex = mutableMapOf<DocumentName, MutableSet<Term>>()
     private val invertedIndex = mutableMapOf<Term, MutableMap<DocumentName, MutableSet<TermData>>>()
 
@@ -76,12 +76,12 @@ class IndexState<TermData : Any> {
     fun documentsCount() = forwardIndex.size
 }
 
-data class UpdateDocumentMessage<TermData : Any>(
+internal data class UpdateDocumentMessage<TermData : Any>(
     val documentName: DocumentName,
     val flow: Flow<Posting<TermData>>
 )
 
-data class SearchExactMessage<TermData : Any>(
+internal data class SearchExactMessage<TermData : Any>(
     val term: Term,
     override val dataChannel: SendChannel<SearchResultEntry<TermData>>,
     override val cancelChannel: ReceiveChannel<Unit>,
@@ -104,7 +104,7 @@ data class SearchExactMessage<TermData : Any>(
  * 2. (update finish + no scheduled tasks) -> do nothing  -> move to [initial state]
  * 3. (update request) -> schedule update; launch scheduled tasks -> move to [updating state]
  */
-class IndexOrchestrator<TermData : Any>(
+internal class IndexOrchestrator<TermData : Any>(
     private val indexState: IndexState<TermData>,
     private val updateWorkersCount: Int = 2,
     private val stateUpdateBatchSize: Int = 128,

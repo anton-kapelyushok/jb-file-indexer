@@ -1,43 +1,15 @@
 package home.pathfinder.indexing
 
+import home.pathfinder.indexing.IndexerEvent.WatcherEvent
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
-import java.io.File
-import java.io.FileNotFoundException
 
-interface FileIndexer {
-    suspend fun go(scope: CoroutineScope)
-
-    /**
-     * Updates current roots.
-     * Function call returns (almost) immediately, update is scheduled.
-     * Search is blocked until update comes through.
-     */
-    suspend fun updateContentRoots(newRoots: Set<String>)
-
-    suspend fun searchExact(term: String): Flow<SearchResultEntry<Int>>
-
-    /**
-     * Contains information about index state and errors
-     */
-    val state: StateFlow<FileIndexerStatusInfo>
-}
-
-data class FileIndexerStatusInfo(
-    val indexInfo: IndexStatusInfo,
-    val rootsState: Map<String, String>
-) {
-    companion object {
-        fun empty() = FileIndexerStatusInfo(IndexStatusInfo.empty(), emptyMap())
-    }
-}
-
-sealed interface RootWatcherState {
+internal sealed interface RootWatcherState {
 
     data class Initializing(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable {
         override val isTerminating: Boolean = false
@@ -129,11 +101,8 @@ sealed interface RootWatcherState {
     fun onRootRemoveRequested(): RootWatcherState? = this
 }
 
-sealed interface WatcherEvent {
-    val path: String
-}
 
-sealed interface IndexerEvent {
+internal sealed interface IndexerEvent {
     data class UpdateRoots(val roots: Set<String>) : IndexerEvent
     data class WatcherOverflown(override val path: String) : WatcherEvent, IndexerEvent
     data class WatcherInitialized(override val path: String) : WatcherEvent, IndexerEvent
@@ -148,19 +117,25 @@ sealed interface IndexerEvent {
 
         data class Exact(val term: String, override val ready: CompletableDeferred<Unit>) : Search
     }
+
+    sealed interface WatcherEvent {
+        val path: String
+    }
 }
 
-class FileIndexerImpl : FileIndexer {
+internal class FileIndexerImpl(
+    private val tokenize: (String) -> Flow<Posting<Int>>,
+) : FileIndexer {
 
-    private val index = HashMapIndex<Int>()
+    private val index: HashMapIndex<Int> = HashMapIndex()
 
     private val rootWatcherStates = mutableMapOf<String, RootWatcherState>()
     private var watchedRoots = setOf<String>()
 
     private val indexerEvents = Channel<IndexerEvent>()
 
-    override suspend fun go(scope: CoroutineScope) {
-        scope.launch {
+    override suspend fun go(scope: CoroutineScope): Job {
+        return scope.launch {
 
             launch {
                 combine(index.state, rootsState) { idx, roots ->
@@ -297,23 +272,7 @@ class FileIndexerImpl : FileIndexer {
         rootsState.value = rootWatcherStates.map { (path, state) -> path to state.toString() }.toMap()
     }
 
-    private fun readPath(path: String) = flow {
-        try {
-            File(path).bufferedReader().use { br ->
-                br.lineSequence().forEachIndexed { idx, line ->
-                    line
-                        .split(Regex("\\s"))
-                        .map { it.trim() }
-                        .filter { it.isNotBlank() }
-                        .forEach {
-                            emit(Posting(it, idx + 1))
-                        }
-                }
-            }
-        } catch (e: FileNotFoundException) {
-            // ignore
-        }
-    }.flowOn(Dispatchers.IO)
+    private fun readPath(path: String) = tokenize(path)
 
     private suspend fun updateSearchLock() {
         val allWatchersAreRunning = rootWatcherStates.values.all { !it.isTerminating }

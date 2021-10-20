@@ -17,17 +17,17 @@ import kotlin.random.Random
 
 private val Path.canonicalPath: String get() = toFile().canonicalPath
 
-sealed interface FileEvent {
+internal sealed interface FileEvent {
     data class FileUpdated(val path: String) : FileEvent
     data class FileRemoved(val path: String) : FileEvent
 }
 
-sealed interface RootWatcherEvent {
+internal sealed interface RootWatcherEvent {
     data class RootWatcherFileEvent(val event: FileEvent) : RootWatcherEvent
     object RemoveAll : RootWatcherEvent
 }
 
-class RootWatcher(
+internal class RootWatcher(
     root: String,
     private val cancel: CompletableDeferred<Unit>,
 ) : Actor {
