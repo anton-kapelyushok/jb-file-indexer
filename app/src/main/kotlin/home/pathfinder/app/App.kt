@@ -33,7 +33,11 @@ fun main() {
                 val parts = term.split(" ").map { it.trim() }
 
                 when (val cmd = parts[0]) {
-                    "watch" -> fileIndexer.updateContentRoots(parts.subList(1, parts.size).toSet())
+                    "watch" -> try {
+                        fileIndexer.updateContentRoots(parts.subList(1, parts.size).toSet())
+                    } catch (e: Throwable) {
+                        println("error: $e")
+                    }
                     "find" -> {
                         launch {
                             val (value, duration) = measureTimedValue {

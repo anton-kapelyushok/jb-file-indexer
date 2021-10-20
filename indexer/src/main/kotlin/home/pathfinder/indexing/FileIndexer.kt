@@ -8,6 +8,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
+import java.io.File
+import java.util.*
 
 internal sealed interface RootWatcherState {
 
@@ -204,7 +206,15 @@ internal class FileIndexerImpl(
     override val state = MutableStateFlow(FileIndexerStatusInfo.empty())
 
     override suspend fun updateContentRoots(newRoots: Set<String>) {
-        indexerEvents.send(IndexerEvent.UpdateRoots(newRoots))
+        val normalizedRoots = TreeSet(newRoots.map { File(it).canonicalPath })
+
+        normalizedRoots.forEach {
+            if ((normalizedRoots.higher(it) ?: "").startsWith(it)) {
+                error("Cannot update roots because $it contains ${normalizedRoots.higher(it)!!}")
+            }
+        }
+
+        indexerEvents.send(IndexerEvent.UpdateRoots(normalizedRoots))
     }
 
     override suspend fun searchExact(term: String): Flow<SearchResultEntry<Int>> = flow {
