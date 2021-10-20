@@ -106,8 +106,8 @@ internal data class SearchExactMessage<TermData : Any>(
  */
 internal class IndexOrchestrator<TermData : Any>(
     private val indexState: IndexState<TermData>,
-    private val updateWorkersCount: Int = 2,
-    private val stateUpdateBatchSize: Int = 128,
+    private val updateWorkersCount: Int = 1,
+    private val stateUpdateBatchSize: Int = 4,
 ) : Actor {
     val searchMailbox = Channel<SearchExactMessage<TermData>>()
     val updateMailbox = Channel<UpdateDocumentMessage<TermData>>()
@@ -232,7 +232,7 @@ internal class IndexOrchestrator<TermData : Any>(
     private fun CoroutineScope.launchUpdateWorker() = launch {
         suspend fun performUpdate(documentName: DocumentName, data: Flow<Posting<TermData>>) {
             try {
-                val buffer = mutableListOf<Posting<TermData>>()
+                val buffer = ArrayList<Posting<TermData>>(stateUpdateBatchSize)
 
                 stateUpdateMutex.withLock { indexState.removeDocument(documentName) }
 

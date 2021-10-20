@@ -20,7 +20,7 @@ fun main() {
 
         launch(Dispatchers.Default) { fileIndexer.go(this) }
 
-        fileIndexer.updateContentRoots(setOf("src/indexer"))
+        fileIndexer.updateContentRoots(setOf("."))
         val millis = measureTimeMillis { println(fileIndexer.searchExact("override").toList()) }
         println("Started in $millis")
 
