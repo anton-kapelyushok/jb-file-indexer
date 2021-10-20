@@ -4,8 +4,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.Channel.Factory.CONFLATED
-import kotlinx.coroutines.channels.Channel.Factory.UNLIMITED
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
@@ -33,26 +31,111 @@ interface FileIndexer {
 typealias FileIndexerState = Any
 
 sealed interface RootWatcherState {
-    data class Initializing(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable
-    data class Running(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable
-    data class Failed(override val cancel: CompletableDeferred<Unit>, val error: Throwable) : RootWatcherState,
-        Cancelable
 
-    data class Removed(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable
-    object Canceling : RootWatcherState
+    data class Initializing(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable {
+        override val isTerminating: Boolean = false
+        override fun onWatcherEvent(event: WatcherEvent): RootWatcherState {
+            return when (event) {
+                is IndexerEvent.WatcherFailed -> Failing(event.exception)
+                is IndexerEvent.WatcherInitialized -> Running(cancel)
+                is IndexerEvent.WatcherOverflown -> onTerminate()
+                else -> this
+            }
+        }
+
+        override fun onTerminate(): RootWatcherState {
+            cancel.complete(Unit)
+            return Canceling
+        }
+    }
+
+    data class Running(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable {
+        override val isTerminating: Boolean = false
+
+        override fun onWatcherEvent(event: WatcherEvent): RootWatcherState {
+            return when (event) {
+                is IndexerEvent.WatcherFailed -> Failing(event.exception)
+                is IndexerEvent.WatcherRootDeleted -> RootRemoved
+                is IndexerEvent.WatcherOverflown -> onTerminate()
+                else -> this
+            }
+        }
+
+        override fun onTerminate(): RootWatcherState {
+            cancel.complete(Unit)
+            return Canceling
+        }
+    }
+
+    data class Failing(val error: Throwable) : RootWatcherState {
+        private var rootRemoveRequested = false
+
+        override val isTerminating: Boolean = true
+
+        override fun onWatcherEvent(event: WatcherEvent): RootWatcherState? {
+            return when (event) {
+                is IndexerEvent.WatcherFinished -> if (rootRemoveRequested) null else Failed(error)
+                else -> this
+            }
+        }
+
+        override fun onRootRemoveRequested(): RootWatcherState {
+            rootRemoveRequested = true
+            return this
+        }
+    }
+
+    data class Failed(val error: Throwable) : RootWatcherState {
+        override val isTerminating: Boolean = false
+
+        override fun onRootRemoveRequested(): RootWatcherState? {
+            return null
+        }
+    }
+
+    object RootRemoved : RootWatcherState {
+        override val isTerminating: Boolean = false
+
+        override fun onRootRemoveRequested(): RootWatcherState? {
+            return null
+        }
+    }
+
+    object Canceling : RootWatcherState {
+        override val isTerminating: Boolean = true
+
+        override fun onWatcherEvent(event: WatcherEvent): RootWatcherState? {
+            return when (event) {
+                is IndexerEvent.WatcherFinished -> null
+                else -> this
+            }
+        }
+    }
 
     interface Cancelable {
         val cancel: CompletableDeferred<Unit>
     }
+
+    val isTerminating: Boolean
+    fun onTerminate(): RootWatcherState = this
+    fun onWatcherEvent(event: WatcherEvent): RootWatcherState? = this
+    fun onRootRemoveRequested(): RootWatcherState? = this
+}
+
+sealed interface WatcherEvent {
+    val path: String
 }
 
 sealed interface IndexerEvent {
     data class UpdateRoots(val roots: Set<String>) : IndexerEvent
-    data class WatcherOverflown(val path: String) : IndexerEvent
-    data class WatcherInitialized(val path: String) : IndexerEvent
-    data class WatcherFinished(val path: String) : IndexerEvent
-    data class WatcherFailed(val path: String, val exception: Throwable) : IndexerEvent
-    data class WatcherRootRemoved(val path: String) : IndexerEvent
+    data class WatcherOverflown(override val path: String) : WatcherEvent, IndexerEvent
+    data class WatcherInitialized(override val path: String) : WatcherEvent, IndexerEvent
+    data class WatcherFinished(override val path: String) : WatcherEvent, IndexerEvent
+    data class WatcherFailed(override val path: String, val exception: Throwable) : WatcherEvent, IndexerEvent
+    data class WatcherRootDeleted(override val path: String) : WatcherEvent, IndexerEvent
+    data class FileUpdated(val path: String) : IndexerEvent
+    data class FileRemoved(val path: String) : IndexerEvent
+
     sealed interface Search : IndexerEvent {
         val ready: CompletableDeferred<Unit>
 
@@ -65,82 +148,50 @@ class FileIndexerImpl : FileIndexer {
     private val index = HashMapIndex<Int>()
 
     private val rootWatcherStates = mutableMapOf<String, RootWatcherState>()
-    private var watchedRoots = mutableSetOf<String>()
+    private var watchedRoots = setOf<String>()
 
     private val indexerEvents = Channel<IndexerEvent>()
-    private val fileEvents = Channel<FileEvent>(UNLIMITED)
 
     override suspend fun go(scope: CoroutineScope) {
         scope.launch {
             launch { index.go(this) }
 
             launch {
-                for (msg in fileEvents) {
-                    when (msg) {
-                        is FileEvent.FileRemoved -> index.removeDocument(msg.path)
-                        is FileEvent.FileUpdated -> index.updateDocument(msg.path, readPath(msg.path))
-                    }
-                }
-            }
-
-            launch {
                 val workerScope = this
 
-                while (true) {
-                    select<Unit> {
-                        indexerEvents.onReceive { request ->
-                            println("Received updateRequests $request")
-                            when (request) {
-                                is IndexerEvent.UpdateRoots -> {
-                                    val failedRoots =
-                                        rootWatcherStates
-                                            .filter { (_, v) -> v is RootWatcherState.Failed || v is RootWatcherState.Removed }
-                                            .map { (k, _) -> k }
-
-                                    val watchersToCancel = watchedRoots - request.roots + failedRoots
-
-                                    watchedRoots = request.roots.toMutableSet()
-                                    watchersToCancel.forEach { cancelWatcher(it) }
-                                }
-                                is IndexerEvent.WatcherInitialized -> {
-                                    when (val rootState = rootWatcherStates[request.path]) {
-                                        is RootWatcherState.Initializing -> {
-                                            rootWatcherStates[request.path] = RootWatcherState.Running(rootState.cancel)
-                                        }
-                                    }
-                                }
-                                is IndexerEvent.WatcherOverflown -> {
-                                    cancelWatcher(request.path)
-                                }
-                                is IndexerEvent.WatcherFinished -> {
-                                    rootWatcherStates -= request.path
-                                }
-                                is IndexerEvent.Search.Exact -> {
-                                    request.ready.complete(Unit)
-                                }
-                                is IndexerEvent.WatcherFailed -> {
-                                    when (val rootState = rootWatcherStates[request.path]) {
-                                        is RootWatcherState.Cancelable -> {
-                                            rootWatcherStates[request.path] =
-                                                RootWatcherState.Failed(rootState.cancel, request.exception)
-                                        }
-                                    }
-                                }
-                                is IndexerEvent.WatcherRootRemoved -> {
-                                    when (val rootState = rootWatcherStates[request.path]) {
-                                        is RootWatcherState.Initializing, is RootWatcherState.Running -> {
-                                            (rootState as RootWatcherState.Cancelable)
-                                            rootWatcherStates[request.path] = RootWatcherState.Removed(rootState.cancel)
-                                        }
-                                    }
-                                }
+                for (request in indexerEvents) {
+                    println("Received updateRequests $request")
+                    when (request) {
+                        is IndexerEvent.UpdateRoots -> {
+                            val rootRemoveRequests = rootWatcherStates.keys - request.roots
+                            rootRemoveRequests.forEach { path ->
+                                rootWatcherStates.computeIfPresent(path) { _, state -> state.onRootRemoveRequested() }
                             }
 
-                            launchMissingWatchers(workerScope)
-                            updateIndexLockingStatus()
-                            println("$rootWatcherStates")
+                            watchedRoots = request.roots
+
+                            synchronizeWatchers(workerScope)
+                            updateSearchLock()
+                        }
+                        is WatcherEvent -> {
+                            rootWatcherStates.computeIfPresent(request.path) { _, state ->
+                                state.onWatcherEvent(request)
+                            }
+
+                            synchronizeWatchers(workerScope)
+                            updateSearchLock()
+                        }
+                        is IndexerEvent.Search.Exact -> {
+                            request.ready.complete(Unit)
+                        }
+                        is IndexerEvent.FileUpdated -> {
+                            index.updateDocument(request.path, readPath(request.path))
+                        }
+                        is IndexerEvent.FileRemoved -> {
+                            index.removeDocument(request.path)
                         }
                     }
+                    println(rootWatcherStates)
                 }
             }
         }
@@ -159,24 +210,20 @@ class FileIndexerImpl : FileIndexer {
         index.searchExact(term).onEach { emit(it) }.collect()
     }
 
-    private suspend fun cancelWatcher(root: String) {
-        when (val rootState = rootWatcherStates[root]) {
-            is RootWatcherState.Cancelable -> {
-                rootState.cancel.complete(Unit)
-                rootWatcherStates[root] = RootWatcherState.Canceling
-            }
-        }
-    }
+    private suspend fun synchronizeWatchers(scope: CoroutineScope) {
+        rootWatcherStates
+            .filter { (path, _) -> path !in watchedRoots }
+            .forEach { (path, state) -> rootWatcherStates[path] = state.onTerminate() }
 
-    private suspend fun launchMissingWatchers(scope: CoroutineScope) {
-        if (rootWatcherStates.values.any { it is RootWatcherState.Canceling }) return
+        if (rootWatcherStates.values.any { it.isTerminating }) return
 
-        val updatesToRun = watchedRoots
+        rootWatcherStates
+            .filter { (path, _) -> path !in watchedRoots }
+            .forEach { (path, _) -> rootWatcherStates.remove(path) }
+
+        watchedRoots
             .filter { it !in rootWatcherStates }
-
-        updatesToRun.forEach {
-            launchWatcher(scope, it)
-        }
+            .forEach { launchWatcher(scope, it) }
     }
 
     private suspend fun launchWatcher(scope: CoroutineScope, path: String) {
@@ -196,11 +243,15 @@ class FileIndexerImpl : FileIndexer {
         scope.launch {
             try {
                 var running = true
+
                 val job = watcher.go(this)
                 while (running) {
                     select<Unit> {
-                        watcher.fileEvents.onReceive {
-                            fileEvents.send(it)
+                        watcher.fileUpdated.onReceive { filePath ->
+                            indexerEvents.send(IndexerEvent.FileUpdated(filePath))
+                        }
+                        watcher.fileRemoved.onReceive { filePath ->
+                            indexerEvents.send(IndexerEvent.FileRemoved(filePath))
                         }
                         watcher.started.onReceive {
                             indexerEvents.send(IndexerEvent.WatcherInitialized(path))
@@ -212,7 +263,7 @@ class FileIndexerImpl : FileIndexer {
                             indexerEvents.send(IndexerEvent.WatcherFailed(path, it))
                         }
                         watcher.rootRemoved.onReceive {
-                            indexerEvents.send(IndexerEvent.WatcherRootRemoved(path))
+                            indexerEvents.send(IndexerEvent.WatcherRootDeleted(path))
                         }
                         job.onJoin { running = false }
                     }
@@ -241,11 +292,10 @@ class FileIndexerImpl : FileIndexer {
         }
     }.flowOn(Dispatchers.IO)
 
-    private suspend fun updateIndexLockingStatus() {
-        val allWatchersAreRunning =
-            rootWatcherStates.values.all { it is RootWatcherState.Running || it is RootWatcherState.Removed }
-
+    private suspend fun updateSearchLock() {
+        val allWatchersAreRunning = rootWatcherStates.values.all { !it.isTerminating }
         val allRootsAreWatched = (watchedRoots - rootWatcherStates.keys).isEmpty()
+
         val searchIsAllowed = allWatchersAreRunning && allRootsAreWatched
         index.setSearchLockStatus(status = !searchIsAllowed)
     }

@@ -32,13 +32,15 @@ class RootWatcher(
     private val cancel: CompletableDeferred<Unit>,
 ) : Actor {
 
-    val fileEvents: ReceiveChannel<FileEvent> get() = myFileEvents
+    val fileUpdated: ReceiveChannel<String> get() = myFileAdded
+    val fileRemoved: ReceiveChannel<String> get() = myFileRemoved
     val started: ReceiveChannel<Unit> get() = myStarted
     val overflow: ReceiveChannel<Unit> get() = myOverflow
     val error: ReceiveChannel<Throwable> get() = myError
     val rootRemoved: ReceiveChannel<Unit> get() = myRootRemoved
 
-    private val myFileEvents = Channel<FileEvent>()
+    private val myFileAdded = Channel<String>()
+    private val myFileRemoved = Channel<String>()
     private val myStarted = Channel<Unit>(CONFLATED)
     private val myOverflow = Channel<Unit>(CONFLATED)
     private val myError = Channel<Throwable>(CONFLATED)
@@ -62,18 +64,18 @@ class RootWatcher(
                     when (val fileEvent = event.event) {
                         is FileEvent.FileUpdated -> {
                             files += fileEvent.path
-                            myFileEvents.send(fileEvent)
+                            myFileAdded.send(fileEvent.path)
                         }
                         is FileEvent.FileRemoved -> {
                             files -= fileEvent.path
-                            myFileEvents.send(fileEvent)
+                            myFileRemoved.send(fileEvent.path)
                         }
                     }
                 }
                 RootWatcherEvent.RemoveAll -> {
                     files.forEach {
 //                        println("remove $it")
-                        myFileEvents.send(FileEvent.FileRemoved(it))
+                        myFileRemoved.send(it)
                     }
                     files.clear()
                 }
@@ -113,8 +115,6 @@ class RootWatcher(
 
             internalEvents.send(RootWatcherEvent.RemoveAll)
             internalEvents.close()
-
-            cancel.await()
         }
 
     private suspend fun emitFileAdded(path: String) {
