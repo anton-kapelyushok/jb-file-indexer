@@ -14,6 +14,7 @@ import java.util.*
 internal sealed interface RootWatcherState {
 
     class UnexpectedWatcherStopException : RuntimeException()
+    class RootDeletedException : RuntimeException()
 
     data class Initializing(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable {
         override val isTerminating: Boolean = false
@@ -42,7 +43,7 @@ internal sealed interface RootWatcherState {
         override fun onWatcherEvent(event: WatcherEvent): RootWatcherState {
             return when (event) {
                 is IndexerEvent.WatcherFailed -> Failing(event.exception)
-                is IndexerEvent.WatcherRootDeleted -> RootRemoved
+                is IndexerEvent.WatcherRootDeleted -> Failing(RootDeletedException())
                 is IndexerEvent.WatcherOverflown -> onTerminate()
                 is IndexerEvent.WatcherStopped -> Failing(UnexpectedWatcherStopException())
                 else -> this
@@ -83,15 +84,6 @@ internal sealed interface RootWatcherState {
         }
     }
 
-    object RootRemoved : RootWatcherState {
-        override val isTerminating: Boolean = false
-        override val isReadyForSearch = true
-
-        override fun onRootRemoveRequested(): RootWatcherState? {
-            return null
-        }
-    }
-
     object Canceling : RootWatcherState {
         override val isTerminating: Boolean = true
         override val isReadyForSearch = false
@@ -118,12 +110,14 @@ internal sealed interface RootWatcherState {
 
 internal sealed interface IndexerEvent {
     data class UpdateRoots(val roots: Set<String>) : IndexerEvent
+
     data class WatcherOverflown(override val path: String) : WatcherEvent, IndexerEvent
     data class WatcherInitialized(override val path: String) : WatcherEvent, IndexerEvent
     data class WatcherFinished(override val path: String) : WatcherEvent, IndexerEvent
     data class WatcherFailed(override val path: String, val exception: Throwable) : WatcherEvent, IndexerEvent
     data class WatcherRootDeleted(override val path: String) : WatcherEvent, IndexerEvent
     data class WatcherStopped(override val path: String) : WatcherEvent, IndexerEvent
+
     data class FileUpdated(val path: String) : IndexerEvent
     data class FileRemoved(val path: String) : IndexerEvent
 
