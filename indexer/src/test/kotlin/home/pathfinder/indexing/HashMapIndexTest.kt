@@ -164,11 +164,21 @@ internal class HashMapIndexTest {
             }
 
             searchStarted.await()
-            index.updateDocument("doc2", flow {})
+            index.updateDocument("doc2", flow {
+                emit(Posting("term1", 3))
+            })
 
             delay(100)
             assertThat(index.state.value.pendingUpdates).isEqualTo(1)
             searchJob.cancel()
+
+            assertThat(index.searchExactOrdered("term1")).isEqualTo(
+                listOf(
+                    SearchResultEntry("doc1", "term1", 1),
+                    SearchResultEntry("doc1", "term1", 2),
+                    SearchResultEntry("doc2", "term1", 3),
+                )
+            )
         }
     }
 
