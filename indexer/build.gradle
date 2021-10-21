@@ -4,4 +4,6 @@ plugins {
 
 dependencies {
     implementation 'io.methvin:directory-watcher:0.15.0'
+
+    testImplementation 'com.willowtreeapps.assertk:assertk-jvm:0.24'
 }

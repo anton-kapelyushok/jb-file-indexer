@@ -43,7 +43,11 @@ suspend fun <ResultData : Any> handleFlowFromActorMessage(
 ) = supervisorScope {
     try {
         val job = launch {
-            fn(msg.dataChannel)
+            try {
+                fn(msg.dataChannel)
+            } catch (e: Throwable) {
+                msg.dataChannel.close(e)
+            }
         }
         select<Unit> {
             job.onJoin {}
@@ -53,7 +57,7 @@ suspend fun <ResultData : Any> handleFlowFromActorMessage(
                 job.join()
             }
         }
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         msg.dataChannel.close(e)
         throw e
     } finally {
