@@ -38,6 +38,7 @@ internal class RootWatcher(
     val overflow: ReceiveChannel<Unit> get() = myOverflow
     val error: ReceiveChannel<Throwable> get() = myError
     val rootRemoved: ReceiveChannel<Unit> get() = myRootRemoved
+    val stoppedWatching: ReceiveChannel<Unit> get() = myStoppedWatching
 
     private val myFileAdded = Channel<String>()
     private val myFileRemoved = Channel<String>()
@@ -45,6 +46,7 @@ internal class RootWatcher(
     private val myOverflow = Channel<Unit>(CONFLATED)
     private val myError = Channel<Throwable>(CONFLATED)
     private val myRootRemoved = Channel<Unit>(CONFLATED)
+    private val myStoppedWatching = Channel<Unit>(CONFLATED)
 
     private val root = Paths.get(root).canonicalPath
     private val internalEvents = Channel<RootWatcherEvent>()
@@ -109,6 +111,8 @@ internal class RootWatcher(
                 cancel.onAwait { job.cancel() }
                 job.onJoin {}
             }
+
+            myStoppedWatching.send(Unit)
 
             internalEvents.send(RootWatcherEvent.RemoveAll)
             internalEvents.close()

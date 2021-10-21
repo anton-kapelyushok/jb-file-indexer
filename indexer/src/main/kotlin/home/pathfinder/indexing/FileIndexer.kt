@@ -13,6 +13,8 @@ import java.util.*
 
 internal sealed interface RootWatcherState {
 
+    class UnexpectedWatcherStopException : RuntimeException()
+
     data class Initializing(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable {
         override val isTerminating: Boolean = false
         override val isReadyForSearch: Boolean = false
@@ -22,6 +24,7 @@ internal sealed interface RootWatcherState {
                 is IndexerEvent.WatcherFailed -> Failing(event.exception)
                 is IndexerEvent.WatcherInitialized -> Running(cancel)
                 is IndexerEvent.WatcherOverflown -> onTerminate()
+                is IndexerEvent.WatcherStopped -> Failing(UnexpectedWatcherStopException())
                 else -> this
             }
         }
@@ -41,6 +44,7 @@ internal sealed interface RootWatcherState {
                 is IndexerEvent.WatcherFailed -> Failing(event.exception)
                 is IndexerEvent.WatcherRootDeleted -> RootRemoved
                 is IndexerEvent.WatcherOverflown -> onTerminate()
+                is IndexerEvent.WatcherStopped -> Failing(UnexpectedWatcherStopException())
                 else -> this
             }
         }
@@ -119,6 +123,7 @@ internal sealed interface IndexerEvent {
     data class WatcherFinished(override val path: String) : WatcherEvent, IndexerEvent
     data class WatcherFailed(override val path: String, val exception: Throwable) : WatcherEvent, IndexerEvent
     data class WatcherRootDeleted(override val path: String) : WatcherEvent, IndexerEvent
+    data class WatcherStopped(override val path: String) : WatcherEvent, IndexerEvent
     data class FileUpdated(val path: String) : IndexerEvent
     data class FileRemoved(val path: String) : IndexerEvent
 
@@ -276,6 +281,9 @@ internal class FileIndexerImpl(
                         }
                         watcher.rootRemoved.onReceive {
                             indexerEvents.send(IndexerEvent.WatcherRootDeleted(path))
+                        }
+                        watcher.stoppedWatching.onReceive {
+                            indexerEvents.send(IndexerEvent.WatcherStopped(path))
                         }
                         job.onJoin { running = false }
                     }
