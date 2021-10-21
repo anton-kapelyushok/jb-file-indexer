@@ -23,6 +23,7 @@ internal sealed interface FileEvent {
 }
 
 internal sealed interface RootWatcherEvent {
+    data class ProxyEmit(val fn: suspend () -> Unit) : RootWatcherEvent
     data class RootWatcherFileEvent(val event: FileEvent) : RootWatcherEvent
     object RemoveAll : RootWatcherEvent
 }
@@ -80,95 +81,98 @@ internal class RootWatcher(
                     }
                     files.clear()
                 }
+                is RootWatcherEvent.ProxyEmit -> event.fn()
             }
         }
     }
 
+    // I literally have launch(Dispatchers.IO)
+    @Suppress("BlockingMethodInNonBlockingContext")
     private fun CoroutineScope.launchWatchWorker() =
-        launch {
-            val job = launch(Dispatchers.IO) {
-                var watcher: DirectoryWatcher? = null
-                try {
-                    watcher = runInterruptible { initializeWatcher() }
-                    yield()
-                    runInterruptible { emitInitialDirectoryStructure() }
-                    myStarted.send(Unit)
-                    runInterruptible {
+        launch(Dispatchers.IO) {
+            var watcher: DirectoryWatcher? = null
+            try {
+                watcher = runInterruptible {
+                    initializeWatcher()
+                }.getOrElse {
+                    if (isActive) emitError(it)
+                    null
+                }
+
+                if (watcher != null) {
+                    emitInitialDirectoryStructure()
+                    emitStarted()
+
+                    val job = launch(Dispatchers.IO) {
                         try {
-                            watcher.watch()
+                            runInterruptible {
+                                watcher.watch()
+                            }
                         } catch (e: ClosedWatchServiceException) {
                             // ignore
+                        } catch (e: Throwable) {
+                            if (isActive) emitError(e)
+                        } finally {
+                            watcher.close()
                         }
                     }
-                } catch (e: Throwable) {
-                    if (isActive) emitError(e)
-                } finally {
-                    watcher?.close()
+
+                    select<Unit> {
+                        cancel.onAwait {
+                            job.cancel()
+                            watcher.close()
+                            job.join()
+                        }
+                        job.onJoin {}
+                    }
                 }
+
+            } catch (e: Throwable) {
+                if (isActive) emitError(e)
+            } finally {
+                watcher?.close()
             }
 
-            select<Unit> {
-                cancel.onAwait { job.cancel() }
-                job.onJoin {}
-            }
+            emitStoppedWatching()
+            emitRemoveAll()
 
-            myStoppedWatching.send(Unit)
-
-            internalEvents.send(RootWatcherEvent.RemoveAll)
             internalEvents.close()
         }
 
-    private suspend fun emitFileAdded(path: String) {
-        internalEvents.send(RootWatcherEvent.RootWatcherFileEvent(FileEvent.FileUpdated(path)))
-    }
 
-    private suspend fun emitFileRemoved(path: String) {
-        internalEvents.send(RootWatcherEvent.RootWatcherFileEvent(FileEvent.FileRemoved(path)))
-    }
-
-    private suspend fun emitOverflow() {
-        myOverflow.send(Unit)
-    }
-
-    private suspend fun emitError(e: Throwable) {
-        myError.send(e)
-    }
-
-    private suspend fun emitRootRemoved() {
-        myRootRemoved.send(Unit)
-    }
-
-    private fun initializeWatcher(): DirectoryWatcher = DirectoryWatcher.builder()
-        .logger(NOPLogger.NOP_LOGGER)
-        .path(Paths.get(root))
-        .fileHasher {
-            // A hack to fast cancel watcher.build()
-            if (Thread.interrupted()) {
-                throw InterruptedException()
+    private fun initializeWatcher(): Result<DirectoryWatcher> = kotlin.runCatching {
+        DirectoryWatcher.builder()
+            .logger(NOPLogger.NOP_LOGGER)
+            .path(Paths.get(root))
+            .fileHasher {
+                // A hack to fast cancel watcher.build()
+                if (Thread.interrupted()) {
+                    throw InterruptedException()
+                }
+                FileHash.fromBytes(Random.Default.nextBytes(16))
             }
-            FileHash.fromBytes(Random.Default.nextBytes(16))
-        }
-        .listener { event ->
-            runBlocking {
-                val path = event.path().canonicalPath
-                val isRegularFile = !event.isDirectory
-                @Suppress("WHEN_ENUM_CAN_BE_NULL_IN_JAVA")
-                when (event.eventType()) {
-                    DirectoryChangeEvent.EventType.CREATE -> {
-                        if (isRegularFile) emitFileAdded(path)
+            .listener { event ->
+                runBlocking {
+                    val path = event.path().canonicalPath
+                    val isRegularFile = !event.isDirectory
+                    @Suppress("WHEN_ENUM_CAN_BE_NULL_IN_JAVA")
+                    when (event.eventType()) {
+                        DirectoryChangeEvent.EventType.CREATE -> {
+                            if (isRegularFile) emitFileAdded(path)
+                        }
+                        DirectoryChangeEvent.EventType.MODIFY -> {
+                            if (isRegularFile) emitFileAdded(path)
+                        }
+                        DirectoryChangeEvent.EventType.DELETE -> {
+                            if (isRegularFile) emitFileRemoved(path)
+                            if (path == root) emitRootRemoved()
+                        }
+                        DirectoryChangeEvent.EventType.OVERFLOW -> emitOverflow()
                     }
-                    DirectoryChangeEvent.EventType.MODIFY -> {
-                        if (isRegularFile) emitFileAdded(path)
-                    }
-                    DirectoryChangeEvent.EventType.DELETE -> {
-                        if (isRegularFile) emitFileRemoved(path)
-                        if (path == root) emitRootRemoved()
-                    }
-                    DirectoryChangeEvent.EventType.OVERFLOW -> emitOverflow()
                 }
             }
-        }
-        .build()
+            .build()
+    }
 
     private fun emitInitialDirectoryStructure() {
         Files.walk(Paths.get(root))
@@ -181,4 +185,29 @@ internal class RootWatcher(
                     }
             }
     }
+
+    private suspend fun emitStarted() =
+        internalEvents.send(RootWatcherEvent.ProxyEmit { myStarted.send(Unit) })
+
+    private suspend fun emitStoppedWatching() =
+        internalEvents.send(RootWatcherEvent.ProxyEmit { myStoppedWatching.send(Unit) })
+
+    private suspend fun emitRemoveAll() =
+        internalEvents.send(RootWatcherEvent.RemoveAll)
+
+    private suspend fun emitFileAdded(path: String) =
+        internalEvents.send(RootWatcherEvent.RootWatcherFileEvent(FileEvent.FileUpdated(path)))
+
+    private suspend fun emitFileRemoved(path: String) =
+        internalEvents.send(RootWatcherEvent.RootWatcherFileEvent(FileEvent.FileRemoved(path)))
+
+    private suspend fun emitOverflow() =
+        internalEvents.send(RootWatcherEvent.ProxyEmit { myOverflow.send(Unit) })
+
+    private suspend fun emitError(e: Throwable) =
+        internalEvents.send(RootWatcherEvent.ProxyEmit { myError.send(e) })
+
+    private suspend fun emitRootRemoved() =
+        internalEvents.send(RootWatcherEvent.ProxyEmit { myRootRemoved.send(Unit) })
+
 }

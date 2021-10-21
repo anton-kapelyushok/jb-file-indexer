@@ -258,20 +258,14 @@ internal class FileIndexerImpl(
                 val job = watcher.go(this)
                 while (running) {
                     select<Unit> {
-                        watcher.fileUpdated.onReceive { filePath ->
-                            indexerEvents.send(IndexerEvent.FileUpdated(filePath))
-                        }
-                        watcher.fileRemoved.onReceive { filePath ->
-                            indexerEvents.send(IndexerEvent.FileRemoved(filePath))
+                        watcher.error.onReceive {
+                            indexerEvents.send(IndexerEvent.WatcherFailed(path, it))
                         }
                         watcher.started.onReceive {
                             indexerEvents.send(IndexerEvent.WatcherInitialized(path))
                         }
                         watcher.overflow.onReceive {
                             indexerEvents.send(IndexerEvent.WatcherOverflown(path))
-                        }
-                        watcher.error.onReceive {
-                            indexerEvents.send(IndexerEvent.WatcherFailed(path, it))
                         }
                         watcher.rootRemoved.onReceive {
                             indexerEvents.send(IndexerEvent.WatcherRootDeleted(path))
@@ -280,6 +274,12 @@ internal class FileIndexerImpl(
                             indexerEvents.send(IndexerEvent.WatcherStopped(path))
                         }
                         job.onJoin { running = false }
+                        watcher.fileUpdated.onReceive { filePath ->
+                            indexerEvents.send(IndexerEvent.FileUpdated(filePath))
+                        }
+                        watcher.fileRemoved.onReceive { filePath ->
+                            indexerEvents.send(IndexerEvent.FileRemoved(filePath))
+                        }
                     }
                 }
             } finally {
