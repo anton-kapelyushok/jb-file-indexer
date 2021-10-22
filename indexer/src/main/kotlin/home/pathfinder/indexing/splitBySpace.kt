@@ -12,7 +12,7 @@ fun splitBySpace(path: String): Flow<Posting<Int>> = flow {
         File(path).bufferedReader().use { br ->
             br.lineSequence().forEachIndexed { idx, line ->
                 line
-                    .split(Regex("\\s"))
+                    .split(Regex("\\s+"))
                     .map { it.trim() }
                     .filter { it.isNotBlank() }
                     .forEach {
