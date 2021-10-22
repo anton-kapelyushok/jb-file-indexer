@@ -58,7 +58,7 @@ internal class FileIndexerImpl(
                         is IndexerEvent.UpdateRoots -> {
                             val rootRemoveRequests = rootWatcherStates.keys - indexerEvent.roots
                             rootRemoveRequests.forEach { path ->
-                                rootWatcherStates.computeIfPresent(path) { _, state -> state.onRootRemoveRequested() }
+                                rootWatcherStates.computeIfPresent(path) { _, state -> state.onInterestCeased() }
                             }
 
                             watchedRoots = indexerEvent.roots

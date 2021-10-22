@@ -1,6 +1,7 @@
 package home.pathfinder.indexing
 
 import io.methvin.watcher.DirectoryChangeEvent
+import io.methvin.watcher.DirectoryChangeListener
 import io.methvin.watcher.DirectoryWatcher
 import io.methvin.watcher.hashing.FileHash
 import kotlinx.coroutines.*
@@ -65,9 +66,7 @@ internal class RootWatcher(
                         events.send(RootWatcherEvent.FileDeleted(it))
                     }
                     files.clear()
-                }
-                RootWatcherEvent.Stopped -> {
-                    events.send(event)
+                    events.send(RootWatcherEvent.Stopped)
                     events.close()
                 }
                 else -> {
@@ -85,7 +84,7 @@ internal class RootWatcher(
             try {
                 val watcherBuildJob = async {
                     try {
-                        runInterruptible { initializeWatcher() }
+                        runInterruptible { initializeWatcher(cancel) }
                     } catch (e: Throwable) {
                         if (isActive) emitError(e)
                         null
@@ -137,13 +136,12 @@ internal class RootWatcher(
             }
 
             emitStoppedWatching()
-            emitStopped()
 
             internalEvents.close()
         }
 
 
-    private fun initializeWatcher(): DirectoryWatcher {
+    private fun initializeWatcher(cancel: CompletableDeferred<Unit>): DirectoryWatcher {
         return DirectoryWatcher.builder()
             .logger(NOPLogger.NOP_LOGGER)
             .path(Paths.get(root))
@@ -154,26 +152,35 @@ internal class RootWatcher(
                 }
                 FileHash.fromBytes(Random.nextBytes(16))
             }
-            .listener { event ->
-                runBlocking {
-                    val path = event.path().canonicalPath
-                    val isRegularFile = !event.isDirectory
-                    @Suppress("WHEN_ENUM_CAN_BE_NULL_IN_JAVA")
-                    when (event.eventType()) {
-                        DirectoryChangeEvent.EventType.CREATE -> {
-                            if (isRegularFile) emitFileAdded(path)
+            .listener(object : DirectoryChangeListener {
+                override fun onEvent(event: DirectoryChangeEvent) {
+                    runBlocking {
+                        val path = event.path().canonicalPath
+                        val isRegularFile = !event.isDirectory
+                        @Suppress("WHEN_ENUM_CAN_BE_NULL_IN_JAVA")
+                        when (event.eventType()) {
+                            DirectoryChangeEvent.EventType.CREATE -> {
+                                if (isRegularFile) emitFileAdded(path)
+                            }
+                            DirectoryChangeEvent.EventType.MODIFY -> {
+                                if (isRegularFile) emitFileAdded(path)
+                            }
+                            DirectoryChangeEvent.EventType.DELETE -> {
+                                if (isRegularFile) emitFileDeleted(path)
+                                if (path == root) emitRootDeleted()
+                            }
+                            DirectoryChangeEvent.EventType.OVERFLOW -> emitOverflow()
                         }
-                        DirectoryChangeEvent.EventType.MODIFY -> {
-                            if (isRegularFile) emitFileAdded(path)
-                        }
-                        DirectoryChangeEvent.EventType.DELETE -> {
-                            if (isRegularFile) emitFileDeleted(path)
-                            if (path == root) emitRootDeleted()
-                        }
-                        DirectoryChangeEvent.EventType.OVERFLOW -> emitOverflow()
                     }
                 }
-            }
+
+                override fun onException(e: Exception) {
+                    runBlocking {
+                        emitError(e)
+                        cancel.complete(Unit)
+                    }
+                }
+            })
             .build()
     }
 

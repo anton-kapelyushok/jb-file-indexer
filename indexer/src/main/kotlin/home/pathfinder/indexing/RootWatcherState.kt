@@ -3,7 +3,6 @@ package home.pathfinder.indexing
 import home.pathfinder.indexing.RootWatcherEvent.RootWatcherLifeCycleEvent
 import kotlinx.coroutines.CompletableDeferred
 
-
 internal sealed interface RootWatcherState {
 
     class UnexpectedWatcherStopException : RuntimeException()
@@ -18,7 +17,7 @@ internal sealed interface RootWatcherState {
                 is RootWatcherEvent.Failed -> Failing(event.exception)
                 is RootWatcherEvent.Initialized -> Running(cancel)
                 is RootWatcherEvent.Overflown -> onTerminate()
-                is RootWatcherEvent.Stopped -> Failing(UnexpectedWatcherStopException())
+                is RootWatcherEvent.StoppedWatching -> Failing(UnexpectedWatcherStopException())
                 else -> this
             }
         }
@@ -38,7 +37,7 @@ internal sealed interface RootWatcherState {
                 is RootWatcherEvent.Failed -> Failing(event.exception)
                 is RootWatcherEvent.RootDeleted -> Failing(RootDeletedException())
                 is RootWatcherEvent.Overflown -> onTerminate()
-                is RootWatcherEvent.Stopped -> Failing(UnexpectedWatcherStopException())
+                is RootWatcherEvent.StoppedWatching -> Failing(UnexpectedWatcherStopException())
                 else -> this
             }
         }
@@ -62,7 +61,7 @@ internal sealed interface RootWatcherState {
             }
         }
 
-        override fun onRootRemoveRequested(): RootWatcherState {
+        override fun onInterestCeased(): RootWatcherState {
             rootRemoveRequested = true
             return this
         }
@@ -72,7 +71,7 @@ internal sealed interface RootWatcherState {
         override val terminating: Boolean = false
         override val inConsistentState = true
 
-        override fun onRootRemoveRequested(): RootWatcherState? {
+        override fun onInterestCeased(): RootWatcherState? {
             return null
         }
     }
@@ -95,8 +94,8 @@ internal sealed interface RootWatcherState {
 
     val terminating: Boolean
     val inConsistentState: Boolean
-    
+
     fun onTerminate(): RootWatcherState = this
     fun onWatcherEvent(event: RootWatcherLifeCycleEvent): RootWatcherState? = this
-    fun onRootRemoveRequested(): RootWatcherState? = this
+    fun onInterestCeased(): RootWatcherState? = this
 }

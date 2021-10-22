@@ -29,7 +29,7 @@ class RootWatcherTest {
                 assertThat(startedEvents.size).isEqualTo(2)
                 assertThat(startedEvents[0]).isInstanceOf(FileUpdated::class)
                 assertThat((startedEvents[0] as FileUpdated).path).endsWith("poupa.txt")
-                assertThat(startedEvents[1]).isInstanceOf(RootWatcherEvent.Initialized::class)
+                assertThat(startedEvents[1]).isInstanceOf(Initialized::class)
 
                 file.writeLines(sequence { yield("1") })
                 val updatedEvents1 = result.getEvents(1)
