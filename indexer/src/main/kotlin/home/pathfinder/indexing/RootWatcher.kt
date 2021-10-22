@@ -83,14 +83,26 @@ internal class RootWatcher(
         launch(Dispatchers.IO) {
             var watcher: DirectoryWatcher? = null
             try {
-                watcher = runInterruptible {
-                    initializeWatcher()
-                }.getOrElse {
-                    if (isActive) emitError(it)
-                    null
+                val watcherBuildJob = async {
+                    try {
+                        runInterruptible { initializeWatcher() }
+                    } catch (e: Throwable) {
+                        if (isActive) emitError(e)
+                        null
+                    }
                 }
 
-                if (watcher != null) {
+                select<Unit> {
+                    cancel.onAwait {
+                        watcherBuildJob.cancel()
+                        watcherBuildJob.join()
+                    }
+                    watcherBuildJob.onJoin {}
+                }
+
+                watcher = watcherBuildJob.await()
+
+                if (!cancel.isCompleted && watcher != null) {
                     emitInitialDirectoryStructure()
                     emitStarted()
 
@@ -131,8 +143,8 @@ internal class RootWatcher(
         }
 
 
-    private fun initializeWatcher(): Result<DirectoryWatcher> = kotlin.runCatching {
-        DirectoryWatcher.builder()
+    private fun initializeWatcher(): DirectoryWatcher {
+        return DirectoryWatcher.builder()
             .logger(NOPLogger.NOP_LOGGER)
             .path(Paths.get(root))
             .fileHasher {
@@ -140,7 +152,7 @@ internal class RootWatcher(
                 if (Thread.interrupted()) {
                     throw InterruptedException()
                 }
-                FileHash.fromBytes(Random.Default.nextBytes(16))
+                FileHash.fromBytes(Random.nextBytes(16))
             }
             .listener { event ->
                 runBlocking {
