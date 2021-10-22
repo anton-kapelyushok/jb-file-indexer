@@ -14,5 +14,5 @@ dependencies {
 
 application {
     // Define the main class for the application.
-    mainClass = 'home.app.AppKt'
+    mainClass = 'home.pathfinder.app.AppKt'
 }
