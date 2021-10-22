@@ -29,6 +29,7 @@ fun main() {
             while (true) {
                 println("enter command")
                 val term = readLine()!!
+                println()
 
                 val parts = term.split(" ").map { it.trim() }
 

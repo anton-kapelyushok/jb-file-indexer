@@ -7,8 +7,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.selects.select
 import org.junit.jupiter.api.Test
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.io.path.createDirectory
 import kotlin.io.path.createFile
@@ -19,7 +17,7 @@ import kotlin.io.path.writeLines
 class RootWatcherTest {
     @Test
     fun `should watch file changes`() {
-        rootWatcherTest { workingDirectory ->
+        fileSystemTest { workingDirectory ->
             val file = Paths.get(workingDirectory.toString(), "poupa.txt")
             file.createFile()
             delay(200) // let it flush
@@ -55,7 +53,7 @@ class RootWatcherTest {
 
     @Test
     fun `should handle rootRemoved on file`() {
-        rootWatcherTest { workingDirectory ->
+        fileSystemTest { workingDirectory ->
             val file = Paths.get(workingDirectory.toString(), "poupa.txt")
             file.createFile()
             delay(200) // let it flush
@@ -78,7 +76,7 @@ class RootWatcherTest {
 
     @Test
     fun `should handle directory changes`() {
-        rootWatcherTest { workingDirectory ->
+        fileSystemTest { workingDirectory ->
             val rootDir = Paths.get(workingDirectory.toString(), "poupa")
             rootDir.createDirectory()
 
@@ -122,10 +120,9 @@ class RootWatcherTest {
         }
     }
 
-    //
     @Test
     fun `should handle rootRemoved on directory`() {
-        rootWatcherTest { workingDirectory ->
+        fileSystemTest { workingDirectory ->
             val rootDir = Paths.get(workingDirectory.toString(), "poupa")
             rootDir.createDirectory()
 
@@ -143,22 +140,6 @@ class RootWatcherTest {
                 assertThat(teardownEvents[1]).isInstanceOf(StoppedWatching::class)
                 assertThat(teardownEvents[2]).isInstanceOf(Stopped::class)
             }
-        }
-    }
-
-    private fun <T> rootWatcherTest(fn: suspend CoroutineScope.(dir: Path) -> T): T {
-        val dir = Files.createTempDirectory("poupa")
-        return try {
-            runBlocking(Dispatchers.IO) {
-                withTimeout(5_000) {
-                    fn(dir)
-                }
-            }
-        } finally {
-            Files.walk(dir)
-                .sorted(Comparator.reverseOrder())
-                .map(Path::toFile)
-                .forEach(File::delete)
         }
     }
 

@@ -41,10 +41,6 @@ interface Actor {
     suspend fun go(scope: CoroutineScope): Job
 }
 
-interface Tokenizer<TermData : Any> {
-    fun tokenize(path: String): Flow<Posting<TermData>>
-}
-
 data class IndexStatusInfo(
     val searchLocked: Boolean,
     val runningUpdates: Int,
@@ -80,9 +76,17 @@ data class Posting<TermData : Any>(
 
 data class FileIndexerStatusInfo(
     val indexInfo: IndexStatusInfo,
-    val rootsState: Map<String, String>
+    val watcherStates: Map<String, RootWatcherStateInfo>
 ) {
     companion object {
         fun empty() = FileIndexerStatusInfo(IndexStatusInfo.empty(), emptyMap())
+    }
+
+    override fun toString(): String {
+        return """indexInfo: 
+$indexInfo
+
+rootStates:
+${watcherStates.entries.joinToString("\n")}"""
     }
 }

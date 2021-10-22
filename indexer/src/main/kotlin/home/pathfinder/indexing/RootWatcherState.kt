@@ -22,9 +22,15 @@ internal sealed interface RootWatcherState {
             }
         }
 
+        override fun asStatus() = RootWatcherStateInfo(RootWatcherStateInfo.Status.Initializing)
+
         override fun onTerminate(): RootWatcherState {
             cancel.complete(Unit)
             return Canceling
+        }
+
+        override fun toString(): String {
+            return "Initializing"
         }
     }
 
@@ -42,9 +48,15 @@ internal sealed interface RootWatcherState {
             }
         }
 
+        override fun asStatus() = RootWatcherStateInfo(RootWatcherStateInfo.Status.Running)
+
         override fun onTerminate(): RootWatcherState {
             cancel.complete(Unit)
             return Canceling
+        }
+
+        override fun toString(): String {
+            return "Running"
         }
     }
 
@@ -65,6 +77,12 @@ internal sealed interface RootWatcherState {
             rootRemoveRequested = true
             return this
         }
+
+        override fun toString(): String {
+            return "Failing, error: $error"
+        }
+
+        override fun asStatus() = RootWatcherStateInfo(RootWatcherStateInfo.Status.Failing, error)
     }
 
     data class Failed(val error: Throwable) : RootWatcherState {
@@ -74,6 +92,12 @@ internal sealed interface RootWatcherState {
         override fun onInterestCeased(): RootWatcherState? {
             return null
         }
+
+        override fun toString(): String {
+            return "Failed, error: $error"
+        }
+
+        override fun asStatus() = RootWatcherStateInfo(RootWatcherStateInfo.Status.Failed, error)
     }
 
     object Canceling : RootWatcherState {
@@ -86,6 +110,12 @@ internal sealed interface RootWatcherState {
                 else -> this
             }
         }
+
+        override fun toString(): String {
+            return "Canceling"
+        }
+
+        override fun asStatus() = RootWatcherStateInfo(RootWatcherStateInfo.Status.Cancelling)
     }
 
     interface Cancelable {
@@ -98,4 +128,9 @@ internal sealed interface RootWatcherState {
     fun onTerminate(): RootWatcherState = this
     fun onWatcherEvent(event: RootWatcherLifeCycleEvent): RootWatcherState? = this
     fun onInterestCeased(): RootWatcherState? = this
+    fun asStatus(): RootWatcherStateInfo
+}
+
+data class RootWatcherStateInfo(val status: Status, val exception: Throwable? = null) {
+    enum class Status { Initializing, Running, Failing, Failed, Cancelling }
 }

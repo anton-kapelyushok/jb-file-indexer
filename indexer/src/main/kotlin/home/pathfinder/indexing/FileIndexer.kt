@@ -97,7 +97,7 @@ internal class FileIndexerImpl(
         }
     }
 
-    private val rootsState = MutableStateFlow<Map<String, String>>(emptyMap())
+    private val rootsState = MutableStateFlow<Map<String, RootWatcherStateInfo>>(emptyMap())
 
     override val state = MutableStateFlow(FileIndexerStatusInfo.empty())
 
@@ -157,7 +157,7 @@ internal class FileIndexerImpl(
     }
 
     private fun updateState() {
-        rootsState.value = rootWatcherStates.map { (path, state) -> path to state.toString() }.toMap()
+        rootsState.value = rootWatcherStates.map { (path, state) -> path to state.asStatus() }.toMap()
     }
 
     private fun readPath(path: String) = tokenize(path)
