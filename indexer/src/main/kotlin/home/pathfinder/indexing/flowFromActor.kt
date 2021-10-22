@@ -5,10 +5,10 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.Channel.Factory.CONFLATED
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
-import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 
 interface FlowFromActorMessage<ResultData : Any> {
@@ -40,8 +40,8 @@ fun <MessageType : Any, ResultData : Any> flowFromActor(
 suspend fun <ResultData : Any> handleFlowFromActorMessage(
     msg: FlowFromActorMessage<ResultData>,
     fn: suspend (SendChannel<ResultData>) -> Unit
-) = supervisorScope {
-    try {
+) = try {
+    coroutineScope {
         val job = launch {
             try {
                 fn(msg.dataChannel)
@@ -57,11 +57,11 @@ suspend fun <ResultData : Any> handleFlowFromActorMessage(
                 job.join()
             }
         }
-    } catch (e: Throwable) {
-        msg.dataChannel.close(e)
-        throw e
-    } finally {
-        msg.dataChannel.close()
     }
+} catch (e: Throwable) {
+    msg.dataChannel.close(e)
+    throw e
+} finally {
+    msg.dataChannel.close()
 }
 

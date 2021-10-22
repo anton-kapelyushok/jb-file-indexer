@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
-import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -254,21 +253,19 @@ internal class IndexOrchestrator<TermData : Any>(
 
         for ((msg, cancel) in runUpdate) {
             try {
-                supervisorScope {
-                    val job = launch {
-                        try {
-                            performUpdate(msg.documentName, msg.flow)
-                        } catch (e: Throwable) {
-                            updateFailures.send(msg.documentName to e)
-                        }
+                val job = launch {
+                    try {
+                        performUpdate(msg.documentName, msg.flow)
+                    } catch (e: Throwable) {
+                        updateFailures.send(msg.documentName to e)
                     }
+                }
 
-                    select<Unit> {
-                        job.onJoin {}
-                        cancel.onReceive {
-                            job.cancel()
-                            job.join()
-                        }
+                select<Unit> {
+                    job.onJoin {}
+                    cancel.onReceive {
+                        job.cancel()
+                        job.join()
                     }
                 }
             } finally {
