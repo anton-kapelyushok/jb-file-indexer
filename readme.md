@@ -184,4 +184,4 @@ queue воркеров (`runUpdate`) и сохраняем ее в `runningUpdat
 
 * Из очевидного, HashMapIndex не самый оптимальный вариант, так как search таски блокируют update таски и наоборот
 * Реализован только SearchExact, хотя например для StartsWith достаточно в HashMapIndex хешмапу заменить на TreeMap (наверное)
-* API could be better на самом деле
+* ...
