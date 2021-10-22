@@ -5,8 +5,6 @@ import io.methvin.watcher.DirectoryWatcher
 import io.methvin.watcher.hashing.FileHash
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.Channel.Factory.CONFLATED
-import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.selects.select
 import org.slf4j.helpers.NOPLogger
 import java.nio.file.ClosedWatchServiceException
@@ -17,15 +15,19 @@ import kotlin.random.Random
 
 private val Path.canonicalPath: String get() = toFile().canonicalPath
 
-internal sealed interface FileEvent {
-    data class FileUpdated(val path: String) : FileEvent
-    data class FileRemoved(val path: String) : FileEvent
-}
-
 internal sealed interface RootWatcherEvent {
-    data class ProxyEmit(val fn: suspend () -> Unit) : RootWatcherEvent
-    data class RootWatcherFileEvent(val event: FileEvent) : RootWatcherEvent
-    object RemoveAll : RootWatcherEvent
+    sealed interface RootWatcherLifeCycleEvent : RootWatcherEvent
+    sealed interface RootWatcherFileEvent : RootWatcherEvent
+
+    object Overflown : RootWatcherLifeCycleEvent
+    object Initialized : RootWatcherLifeCycleEvent
+    data class Failed(val exception: Throwable) : RootWatcherLifeCycleEvent
+    object RootDeleted : RootWatcherLifeCycleEvent
+    object StoppedWatching : RootWatcherLifeCycleEvent
+    object Stopped : RootWatcherLifeCycleEvent
+
+    data class FileUpdated(val path: String) : RootWatcherFileEvent
+    data class FileDeleted(val path: String) : RootWatcherFileEvent
 }
 
 internal class RootWatcher(
@@ -33,21 +35,7 @@ internal class RootWatcher(
     private val cancel: CompletableDeferred<Unit>,
 ) : Actor {
 
-    val fileUpdated: ReceiveChannel<String> get() = myFileAdded
-    val fileRemoved: ReceiveChannel<String> get() = myFileRemoved
-    val started: ReceiveChannel<Unit> get() = myStarted
-    val overflow: ReceiveChannel<Unit> get() = myOverflow
-    val error: ReceiveChannel<Throwable> get() = myError
-    val rootRemoved: ReceiveChannel<Unit> get() = myRootRemoved
-    val stoppedWatching: ReceiveChannel<Unit> get() = myStoppedWatching
-
-    private val myFileAdded = Channel<String>()
-    private val myFileRemoved = Channel<String>()
-    private val myStarted = Channel<Unit>(CONFLATED)
-    private val myOverflow = Channel<Unit>(CONFLATED)
-    private val myError = Channel<Throwable>(CONFLATED)
-    private val myRootRemoved = Channel<Unit>(CONFLATED)
-    private val myStoppedWatching = Channel<Unit>(CONFLATED)
+    val events = Channel<RootWatcherEvent>()
 
     private val root = Paths.get(root).canonicalPath
     private val internalEvents = Channel<RootWatcherEvent>()
@@ -63,25 +51,28 @@ internal class RootWatcher(
         val files = mutableSetOf<String>()
         for (event in internalEvents) {
             when (event) {
-                is RootWatcherEvent.RootWatcherFileEvent -> {
-                    when (val fileEvent = event.event) {
-                        is FileEvent.FileUpdated -> {
-                            files += fileEvent.path
-                            myFileAdded.send(fileEvent.path)
-                        }
-                        is FileEvent.FileRemoved -> {
-                            files -= fileEvent.path
-                            myFileRemoved.send(fileEvent.path)
-                        }
-                    }
+                is RootWatcherEvent.FileUpdated -> {
+                    files += event.path
+                    events.send(event)
                 }
-                RootWatcherEvent.RemoveAll -> {
+                is RootWatcherEvent.FileDeleted -> {
+                    files -= event.path
+                    events.send(event)
+                }
+                RootWatcherEvent.StoppedWatching -> {
+                    events.send(event)
                     files.forEach {
-                        myFileRemoved.send(it)
+                        events.send(RootWatcherEvent.FileDeleted(it))
                     }
                     files.clear()
                 }
-                is RootWatcherEvent.ProxyEmit -> event.fn()
+                RootWatcherEvent.Stopped -> {
+                    events.send(event)
+                    events.close()
+                }
+                else -> {
+                    events.send(event)
+                }
             }
         }
     }
@@ -134,7 +125,7 @@ internal class RootWatcher(
             }
 
             emitStoppedWatching()
-            emitRemoveAll()
+            emitStopped()
 
             internalEvents.close()
         }
@@ -164,8 +155,8 @@ internal class RootWatcher(
                             if (isRegularFile) emitFileAdded(path)
                         }
                         DirectoryChangeEvent.EventType.DELETE -> {
-                            if (isRegularFile) emitFileRemoved(path)
-                            if (path == root) emitRootRemoved()
+                            if (isRegularFile) emitFileDeleted(path)
+                            if (path == root) emitRootDeleted()
                         }
                         DirectoryChangeEvent.EventType.OVERFLOW -> emitOverflow()
                     }
@@ -187,27 +178,26 @@ internal class RootWatcher(
     }
 
     private suspend fun emitStarted() =
-        internalEvents.send(RootWatcherEvent.ProxyEmit { myStarted.send(Unit) })
+        internalEvents.send(RootWatcherEvent.Initialized)
 
     private suspend fun emitStoppedWatching() =
-        internalEvents.send(RootWatcherEvent.ProxyEmit { myStoppedWatching.send(Unit) })
-
-    private suspend fun emitRemoveAll() =
-        internalEvents.send(RootWatcherEvent.RemoveAll)
+        internalEvents.send(RootWatcherEvent.StoppedWatching)
 
     private suspend fun emitFileAdded(path: String) =
-        internalEvents.send(RootWatcherEvent.RootWatcherFileEvent(FileEvent.FileUpdated(path)))
+        internalEvents.send(RootWatcherEvent.FileUpdated(path))
 
-    private suspend fun emitFileRemoved(path: String) =
-        internalEvents.send(RootWatcherEvent.RootWatcherFileEvent(FileEvent.FileRemoved(path)))
+    private suspend fun emitFileDeleted(path: String) =
+        internalEvents.send(RootWatcherEvent.FileDeleted(path))
 
     private suspend fun emitOverflow() =
-        internalEvents.send(RootWatcherEvent.ProxyEmit { myOverflow.send(Unit) })
+        internalEvents.send(RootWatcherEvent.Overflown)
 
     private suspend fun emitError(e: Throwable) =
-        internalEvents.send(RootWatcherEvent.ProxyEmit { myError.send(e) })
+        internalEvents.send(RootWatcherEvent.Failed(e))
 
-    private suspend fun emitRootRemoved() =
-        internalEvents.send(RootWatcherEvent.ProxyEmit { myRootRemoved.send(Unit) })
+    private suspend fun emitRootDeleted() =
+        internalEvents.send(RootWatcherEvent.RootDeleted)
 
+    private suspend fun emitStopped() =
+        internalEvents.send(RootWatcherEvent.Stopped)
 }

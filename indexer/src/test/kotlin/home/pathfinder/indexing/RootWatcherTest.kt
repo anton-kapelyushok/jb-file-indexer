@@ -1,8 +1,8 @@
 package home.pathfinder.indexing
 
-import assertk.all
 import assertk.assertThat
 import assertk.assertions.*
+import home.pathfinder.indexing.RootWatcherEvent.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.selects.select
 import org.junit.jupiter.api.Test
@@ -15,6 +15,7 @@ import kotlin.io.path.createFile
 import kotlin.io.path.deleteExisting
 import kotlin.io.path.writeLines
 
+@Suppress("BlockingMethodInNonBlockingContext")
 class RootWatcherTest {
     @Test
     fun `should watch file changes`() {
@@ -24,30 +25,30 @@ class RootWatcherTest {
             delay(200) // let it flush
 
             runRootWatcher(file.toString()) { result, cancel ->
-
                 val startedEvents = result.getEvents(2)
                 assertThat(startedEvents.size).isEqualTo(2)
-                assertThat(startedEvents[0].type).isEqualTo("fileUpdated")
-                assertThat(startedEvents[0].payload as String).endsWith("poupa.txt")
-                assertThat(startedEvents[1].type).isEqualTo("started")
+                assertThat(startedEvents[0]).isInstanceOf(FileUpdated::class)
+                assertThat((startedEvents[0] as FileUpdated).path).endsWith("poupa.txt")
+                assertThat(startedEvents[1]).isInstanceOf(RootWatcherEvent.Initialized::class)
 
                 file.writeLines(sequence { yield("1") })
                 val updatedEvents1 = result.getEvents(1)
-                assertThat(updatedEvents1[0].type).isEqualTo("fileUpdated")
-                assertThat(updatedEvents1[0].payload as String).endsWith("poupa.txt")
+                assertThat(updatedEvents1[0]).isInstanceOf(FileUpdated::class)
+                assertThat((updatedEvents1[0] as FileUpdated).path).endsWith("poupa.txt")
 
                 file.writeLines(sequence { yield("2") })
                 val updatedEvents2 = result.getEvents(1)
-                assertThat(updatedEvents2[0].type).isEqualTo("fileUpdated")
-                assertThat(updatedEvents2[0].payload as String).endsWith("poupa.txt")
+                assertThat(updatedEvents2[0]).isInstanceOf(FileUpdated::class)
+                assertThat((updatedEvents2[0] as FileUpdated).path).endsWith("poupa.txt")
                 cancel.complete(Unit)
 
                 val teardownEvents = result.getEvents(Int.MAX_VALUE)
 
-                assertThat(teardownEvents.map { it.type }).all {
-                    hasSize(3)
-                    containsExactly("stoppedWatching", "fileRemoved", "jobFinished")
-                }
+                assertThat(teardownEvents.map { it.javaClass }).hasSize(3)
+
+                assertThat(teardownEvents[0]).isInstanceOf(StoppedWatching::class)
+                assertThat(teardownEvents[1]).isInstanceOf(FileDeleted::class)
+                assertThat(teardownEvents[2]).isInstanceOf(Stopped::class)
             }
         }
     }
@@ -65,10 +66,12 @@ class RootWatcherTest {
 
                 val teardownEvents = result.getEvents(Int.MAX_VALUE)
 
-                assertThat(teardownEvents.map { it.type }).all {
-                    hasSize(4)
-                    containsExactly("fileRemoved", "rootRemoved", "stoppedWatching", "jobFinished")
-                }
+                assertThat(teardownEvents.map { it.javaClass }).hasSize(4)
+
+                assertThat(teardownEvents[0]).isInstanceOf(FileDeleted::class)
+                assertThat(teardownEvents[1]).isInstanceOf(RootDeleted::class)
+                assertThat(teardownEvents[2]).isInstanceOf(StoppedWatching::class)
+                assertThat(teardownEvents[3]).isInstanceOf(Stopped::class)
             }
         }
     }
@@ -89,36 +92,37 @@ class RootWatcherTest {
                 assertThat(startedEvents.size).isEqualTo(3)
 
                 val fileUpdateEvents = startedEvents.subList(0, 2)
-                assertThat(fileUpdateEvents.map { it.type }).each { it.endsWith("fileUpdated") }
-                assertThat(fileUpdateEvents.map { (it.payload as String).split("/").last() })
-                    .containsAll(
-                        "poupa.txt",
-                        "loupa.txt"
-                    )
+                assertThat(fileUpdateEvents).each { it.isInstanceOf(FileUpdated::class) }
+                assertThat(fileUpdateEvents.map { it as FileUpdated }.map { it.path.split(File.separator).last() })
+                    .containsAll("poupa.txt", "loupa.txt")
 
-                assertThat(startedEvents[2].type).isEqualTo("started")
+                assertThat(startedEvents[2]).isInstanceOf(Initialized::class)
 
                 poupaFile.writeLines(sequence { yield("1") })
                 val poupaUpdateEvents = result.getEvents(1)
-                assertThat(poupaUpdateEvents[0].type).isEqualTo("fileUpdated")
-                assertThat(poupaUpdateEvents[0].payload as String).endsWith("poupa.txt")
+
+                assertThat(poupaUpdateEvents[0]).isInstanceOf(FileUpdated::class)
+                assertThat((poupaUpdateEvents[0] as FileUpdated).path).endsWith("poupa.txt")
 
                 loupaFile.deleteExisting()
                 val loupaFileUpdates = result.getEvents(1)
-                assertThat(loupaFileUpdates[0].type).isEqualTo("fileRemoved")
-                assertThat(loupaFileUpdates[0].payload as String).endsWith("loupa.txt")
+                assertThat(loupaFileUpdates[0]).isInstanceOf(FileDeleted::class)
+                assertThat((loupaFileUpdates[0] as FileDeleted).path).endsWith("loupa.txt")
 
                 cancel.complete(Unit)
 
-                assertThat(result.getEvents(Int.MAX_VALUE).map { it.type }).all {
-                    containsAll("stoppedWatching", "fileRemoved", "jobFinished")
-                    hasSize(3)
-                }
+                val teardownEvents = result.getEvents(Int.MAX_VALUE)
 
+                assertThat(teardownEvents.map { it.javaClass }).hasSize(3)
+
+                assertThat(teardownEvents[0]).isInstanceOf(StoppedWatching::class)
+                assertThat(teardownEvents[1]).isInstanceOf(FileDeleted::class)
+                assertThat(teardownEvents[2]).isInstanceOf(Stopped::class)
             }
         }
     }
 
+    //
     @Test
     fun `should handle rootRemoved on directory`() {
         rootWatcherTest { workingDirectory ->
@@ -133,10 +137,11 @@ class RootWatcherTest {
 
                 val teardownEvents = result.getEvents(Int.MAX_VALUE)
 
-                assertThat(teardownEvents.map { it.type }).all {
-                    hasSize(3)
-                    containsExactly("rootRemoved", "stoppedWatching", "jobFinished")
-                }
+                assertThat(teardownEvents.map { it.javaClass }).hasSize(3)
+
+                assertThat(teardownEvents[0]).isInstanceOf(RootDeleted::class)
+                assertThat(teardownEvents[1]).isInstanceOf(StoppedWatching::class)
+                assertThat(teardownEvents[2]).isInstanceOf(Stopped::class)
             }
         }
     }
@@ -180,40 +185,29 @@ class RootWatcherTest {
 
         var running = true
 
-        suspend fun getEvents(numberOfEvents: Int): List<RootWatcherTestEvent> {
-            val events = mutableListOf<RootWatcherTestEvent>()
+        suspend fun getEvents(numberOfEvents: Int): List<RootWatcherEvent> {
+            val events = mutableListOf<RootWatcherEvent>()
 
-            fun add(type: String, payload: Any) {
-                println("$type $payload")
-                events.add(RootWatcherTestEvent(type, payload))
+            fun add(event: RootWatcherEvent) {
+                println("$event")
+                events.add(event)
             }
 
             while (running && events.size < numberOfEvents) {
                 select<Unit> {
-                    watcher.error.onReceive {
-                        add("error", it)
+                    watcher.events.onReceive { event ->
+                        when (event) {
+                            is Stopped -> {
+                                running = false
+                            }
+                            else -> Unit
+                        }
+
+                        add(event)
                     }
-                    watcher.started.onReceive {
-                        add("started", it)
-                    }
-                    watcher.overflow.onReceive {
-                        add("overflow", it)
-                    }
-                    watcher.rootRemoved.onReceive {
-                        add("rootRemoved", it)
-                    }
-                    watcher.stoppedWatching.onReceive {
-                        add("stoppedWatching", it)
-                    }
+
                     job.onJoin {
-                        add("jobFinished", Unit)
                         running = false
-                    }
-                    watcher.fileUpdated.onReceive {
-                        add("fileUpdated", it)
-                    }
-                    watcher.fileRemoved.onReceive {
-                        add("fileRemoved", it)
                     }
                 }
             }
@@ -221,6 +215,4 @@ class RootWatcherTest {
             return events
         }
     }
-
-    data class RootWatcherTestEvent(val type: String, val payload: Any)
 }
