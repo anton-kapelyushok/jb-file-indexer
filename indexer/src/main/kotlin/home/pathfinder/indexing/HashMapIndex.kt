@@ -137,10 +137,6 @@ internal class IndexOrchestrator<TermData : Any>(
 
             while (true) {
                 select<Unit> {
-                    searchLockUpdates.onReceive { v ->
-                        searchLocked = v
-                    }
-
                     searchFinished.onReceive {
                         handleSearchFinished()
                     }
@@ -157,6 +153,10 @@ internal class IndexOrchestrator<TermData : Any>(
 
                     updateMailbox.onReceive { msg ->
                         handleUpdateRequest(msg)
+                    }
+
+                    searchLockUpdates.onReceive { v ->
+                        searchLocked = v
                     }
 
                     if (!searchLocked && runningUpdates.isEmpty() && scheduledUpdates.isEmpty()) {

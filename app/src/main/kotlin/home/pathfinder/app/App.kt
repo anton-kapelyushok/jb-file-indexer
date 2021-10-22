@@ -103,7 +103,7 @@ fun main() {
                         "exit" -> {
                             break
                         }
-                        else -> println("unknown cmd $cmd")
+                        else -> println("unknown cmd $cmd\n")
                     }
                 }
             }
