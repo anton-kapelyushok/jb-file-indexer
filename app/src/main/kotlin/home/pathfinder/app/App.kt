@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.ExperimentalTime
 import kotlin.time.measureTimedValue
 
@@ -39,13 +40,13 @@ fun main() {
 
         try {
             withContext(Dispatchers.IO) {
-                var inputRequested = false
+                var inputRequested = AtomicBoolean(false)
                 suspend fun readLine(): String {
-                    if (!inputRequested) {
+                    if (!inputRequested.get()) {
                         requestInput.send(Unit)
                     }
-                    inputRequested = true
-                    return consoleInput.receive().also { inputRequested = false }
+                    inputRequested.set(true)
+                    return consoleInput.receive().also { inputRequested.set(false) }
                 }
 
                 while (true) {
@@ -87,9 +88,11 @@ fun main() {
                             select<Unit> {
                                 readlineJob.onJoin {
                                     searchJob.cancel()
+                                    searchJob.join()
                                 }
                                 searchJob.onJoin {
                                     readlineJob.cancel()
+                                    readlineJob.join()
                                 }
                             }
 
