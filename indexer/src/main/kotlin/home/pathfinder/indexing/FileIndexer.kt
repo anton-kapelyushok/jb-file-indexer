@@ -28,6 +28,7 @@ internal class FileIndexerImpl(
 ) : FileIndexer {
 
     private val index: HashMapIndex<Int> = HashMapIndex()
+//    private val index: SegmentedIndex = SegmentedIndex()
 
     private val rootWatcherStates = mutableMapOf<String, RootWatcherState>()
     private var watchedRoots = setOf<String>()
