@@ -148,7 +148,7 @@ class RootWatcherTest {
         fn: suspend (result: RootWatcherResult, cancel: CompletableDeferred<Unit>) -> T
     ): T {
         val cancel = CompletableDeferred<Unit>()
-        val rw = RootWatcher(path, cancel)
+        val rw = RootWatcher(WatchedRoot(path, setOf()), cancel)
         val job = launch { rw.go(this) }
 
         return try {

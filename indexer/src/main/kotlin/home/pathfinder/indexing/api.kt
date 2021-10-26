@@ -18,7 +18,7 @@ interface FileIndexer : Actor {
      * Function call returns (almost) immediately, update is scheduled.
      * Search is blocked until update comes through.
      */
-    suspend fun updateContentRoots(newRoots: Set<String>)
+    suspend fun updateContentRoots(newRoots: Set<String>, ignoredRoots: Set<String>)
 
     suspend fun searchExact(term: String): Flow<SearchResultEntry<Int>>
 
@@ -76,7 +76,7 @@ data class Posting<TermData : Any>(
 
 data class FileIndexerStatusInfo(
     val indexInfo: IndexStatusInfo,
-    val watcherStates: Map<String, RootWatcherStateInfo>
+    val watcherStates: Map<WatchedRoot, RootWatcherStateInfo>
 ) {
     companion object {
         fun empty() = FileIndexerStatusInfo(IndexStatusInfo.empty(), emptyMap())

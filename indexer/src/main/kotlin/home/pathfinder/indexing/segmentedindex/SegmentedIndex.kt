@@ -89,7 +89,7 @@ class IndexOrchestrator(
 
     private val performUpdateQueue = Channel<PerformUpdateMessage>()
 
-    private var segments = setOf<SegmentState>()
+    private var segments = mutableSetOf<SegmentState>()
     private val documentToSegment = mutableMapOf<String, SegmentState>()
 
     override suspend fun go(scope: CoroutineScope): Job = scope.launch {
@@ -99,7 +99,8 @@ class IndexOrchestrator(
             while (true) {
                 select<Unit> {
                     performUpdateQueue.onReceive { msg ->
-                        segments = segments - msg.toDelete + msg.toAdd
+                        segments.removeAll(msg.toDelete)
+                        segments.addAll(msg.toAdd)
                         msg.toDelete.forEach { segment -> segment.docNames.forEach { documentToSegment -= it } }
                         msg.toAdd.forEach { segment -> segment.docNames.forEach { documentToSegment[it] = segment } }
                     }
@@ -211,7 +212,7 @@ class IndexOrchestrator(
                                 performUpdateQueue.send(
                                     PerformUpdateMessage(
                                         toDelete = listOfNotNull(msg.oldSegment),
-                                        toAdd = listOf(createSegment(msg.documentName, msg.flow.toList()))
+                                        toAdd = listOf(createSegment(msg.documentName, msg.flow.toList().distinct()))
                                     )
                                 )
                             }
@@ -413,8 +414,13 @@ fun findInSegment(segment: SegmentState, term: String): List<SearchResultEntry<I
     val result = mutableListOf<SearchResultEntry<Int>>()
 
     while (i < segment.termArray.size) {
-        if (!segment.docStates[segment.docArray[i]]) i++
-        if (segment.termArray[i] != termId) break
+        if (!segment.docStates[segment.docArray[i]]) {
+            i++
+            continue
+        }
+        if (segment.termArray[i] != termId) {
+            break
+        }
         result.add(
             SearchResultEntry(
                 documentName = segment.docNames[segment.docArray[i]],

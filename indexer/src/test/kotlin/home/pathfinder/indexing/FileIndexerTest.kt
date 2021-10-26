@@ -53,14 +53,14 @@ class FileIndexerTest {
                 assertThat(indexer.searchExactOrdered("term1")).isEmpty()
 
                 // root updates are recognized immediately
-                indexer.updateContentRoots(setOf(firstRoot.toString()))
+                indexer.updateContentRoots(setOf(firstRoot.toString()), setOf())
                 assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
                     SearchResultEntry("poupa.txt", "term3", 1),
                     SearchResultEntry("poupa.txt", "term3", 2),
                     SearchResultEntry("loupa.txt", "term3", 1),
                 )
 
-                indexer.updateContentRoots(setOf(firstRoot.toString(), secondRoot.toString()))
+                indexer.updateContentRoots(setOf(firstRoot.toString(), secondRoot.toString()), setOf())
                 assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
                     SearchResultEntry("poupa.txt", "term3", 1),
                     SearchResultEntry("poupa.txt", "term3", 2),
@@ -124,12 +124,12 @@ class FileIndexerTest {
                     fileIndexerStatus.watcherStates.any { (path, info) ->
                         info.status == RootWatcherStateInfo.Status.Failed
                                 && info.exception is RootWatcherState.RootDeletedException
-                                && File(path).canonicalPath == secondRoot.toFile().canonicalPath
+                                && File(path.root).canonicalPath == secondRoot.toFile().canonicalPath
                     }
                 }
 
                 // failures are removed from status info on root removal
-                indexer.updateContentRoots(setOf(firstRoot.toString()))
+                indexer.updateContentRoots(setOf(firstRoot.toString()), setOf())
                 waitUntilIndexState(indexer) { fileIndexerStatus ->
                     fileIndexerStatus.watcherStates.all { (_, info) ->
                         info.status != RootWatcherStateInfo.Status.Failed

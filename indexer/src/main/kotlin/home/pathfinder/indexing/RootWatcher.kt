@@ -12,6 +12,7 @@ import java.nio.file.ClosedWatchServiceException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.*
 import kotlin.random.Random
 
 private val Path.canonicalPath: String get() = toFile().canonicalPath
@@ -31,14 +32,17 @@ internal sealed interface RootWatcherEvent {
     data class FileDeleted(val path: String) : RootWatcherFileEvent
 }
 
+data class WatchedRoot(val root: String, val ignoredRoots: Set<String>)
+
 internal class RootWatcher(
-    root: String,
+    watchedRoot: WatchedRoot,
     private val cancel: CompletableDeferred<Unit>,
 ) : Actor {
 
     val events = Channel<RootWatcherEvent>()
 
-    private val root = Paths.get(root).canonicalPath
+    private val root = Paths.get(watchedRoot.root).canonicalPath
+    private val ignoredRoots = TreeSet(watchedRoot.ignoredRoots.map { Paths.get(it).canonicalPath })
     private val internalEvents = Channel<RootWatcherEvent>()
 
     override suspend fun go(
@@ -156,6 +160,8 @@ internal class RootWatcher(
                 override fun onEvent(event: DirectoryChangeEvent) {
                     runBlocking {
                         val path = event.path().canonicalPath
+                        if (isIgnored(path)) return@runBlocking
+
                         val isRegularFile = !event.isDirectory
                         @Suppress("WHEN_ENUM_CAN_BE_NULL_IN_JAVA")
                         when (event.eventType()) {
@@ -187,13 +193,24 @@ internal class RootWatcher(
     private fun emitInitialDirectoryStructure() {
         Files.walk(Paths.get(root))
             .use { stream ->
-                stream.filter(Files::isRegularFile)
+                stream
+                    .filter(Files::isRegularFile)
+                    .map { it.canonicalPath }
+                    .filter { !isIgnored(it) }
                     .forEach {
                         runBlocking {
-                            emitFileAdded(it.canonicalPath)
+                            emitFileAdded(it)
                         }
                     }
             }
+    }
+
+    private fun isIgnored(path: String): Boolean {
+        val closestIgnoredParent = ignoredRoots.floor(path)
+        if (closestIgnoredParent != null && path.startsWith(closestIgnoredParent)) {
+            return true
+        }
+        return false
     }
 
     private suspend fun emitStarted() =
@@ -216,7 +233,4 @@ internal class RootWatcher(
 
     private suspend fun emitRootDeleted() =
         internalEvents.send(RootWatcherEvent.RootDeleted)
-
-    private suspend fun emitStopped() =
-        internalEvents.send(RootWatcherEvent.Stopped)
 }
