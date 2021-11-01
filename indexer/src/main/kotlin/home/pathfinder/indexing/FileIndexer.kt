@@ -2,6 +2,7 @@ package home.pathfinder.indexing
 
 import home.pathfinder.indexing.IndexerEvent.WatcherEvent
 import home.pathfinder.indexing.RootWatcherEvent.RootWatcherLifeCycleEvent
+import home.pathfinder.indexing.segmentedindex.SegmentedIndex
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -27,8 +28,8 @@ internal class FileIndexerImpl(
     private val tokenize: (String) -> Flow<Posting<Int>>,
 ) : FileIndexer {
 
-    private val index: HashMapIndex<Int> = HashMapIndex()
-//    private val index: SegmentedIndex = SegmentedIndex()
+//    private val index: HashMapIndex<Int> = HashMapIndex()
+    private val index: SegmentedIndex = SegmentedIndex()
 
     private val rootWatcherStates = mutableMapOf<WatchedRoot, RootWatcherState>()
     private var watchedRoots = setOf<WatchedRoot>()

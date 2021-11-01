@@ -106,7 +106,7 @@ internal class RootWatcher(
                 watcher = watcherBuildJob.await()
 
                 if (!cancel.isCompleted && watcher != null) {
-                    emitInitialDirectoryStructure()
+                    runInterruptible { emitInitialDirectoryStructure() }
                     emitStarted()
 
                     val job = launch(Dispatchers.IO) {

@@ -28,7 +28,6 @@ suspend fun mergeSegmentsWorker(
             segments -= segment2
         }
 
-        error("poupa")
         output.send(MergeSegmentsResult(originalSegments = segmentsToMerge, resultSegment = segments.first()))
     }
 }
