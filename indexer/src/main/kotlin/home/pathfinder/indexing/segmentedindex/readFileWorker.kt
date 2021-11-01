@@ -10,8 +10,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.selects.select
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 
 data class CreateSegmentFromFileInput(
     val path: String,
@@ -27,17 +25,11 @@ data class CreateSegmentFromFileResult(
 suspend fun createSegmentFromFileWorker(
     input: ReceiveChannel<CreateSegmentFromFileInput>,
     output: SendChannel<CreateSegmentFromFileResult>,
-
-    readFileConcurrency: Int = 1,
 ) = coroutineScope {
-    val semaphore = Semaphore(readFileConcurrency)
     for (msg in input) {
         if (msg.cancelToken.isCompleted) continue
         val dataDeferred = async {
-            semaphore
-                .withPermit {
-                    runCatching { msg.data.toList() }
-                }
+            runCatching { msg.data.toList() }
                 .map { createSegment(msg.path, it) }
         }
         select<Unit> {

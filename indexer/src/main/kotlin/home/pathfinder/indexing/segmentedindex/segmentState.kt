@@ -28,7 +28,7 @@ data class SegmentState(
 fun createSegment(documentName: String, documentData: List<Posting<Int>>): SegmentState {
     val documentNames = arrayOf(documentName)
     val documentStates = booleanArrayOf(true)
-    val terms = documentData.map { it.term }.sorted().distinct().toTypedArray()
+    val terms = documentData.map { it.term }.toSortedSet().toTypedArray()
 
     val termArray = IntArray(documentData.size)
     val docArray = IntArray(documentData.size)
@@ -77,6 +77,9 @@ fun mergeSegments(lSegment: SegmentState, rSegment: SegmentState): SegmentState 
 
     val docNameMap = newDocNames.indices.associateBy { newDocNames[it] }
 
+    val lDocMap = lSegment.docNames.map { docNameMap[it] ?: -1 }.toIntArray()
+    val rDocMap = rSegment.docNames.map { docNameMap[it] ?: -1 }.toIntArray()
+
     val newDocStates = BooleanArray(newDocNames.size) { true }
 
     val newAlivePostings = lSegment.alivePostings + rSegment.alivePostings
@@ -103,8 +106,7 @@ fun mergeSegments(lSegment: SegmentState, rSegment: SegmentState): SegmentState 
             val termId = newTerms.size - 1
             newTermArray[last] = termId
 
-            val docName = segment.docNames[segment.docArray[i]]
-            val docId = docNameMap[docName]!!
+            val docId = if (segment == lSegment) lDocMap[segment.docArray[i]] else rDocMap[segment.docArray[i]]
 
             newDocArray[last] = docId
 

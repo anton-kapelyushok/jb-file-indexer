@@ -281,6 +281,7 @@ internal class IndexOrchestrator<TermData : Any>(
             pendingUpdates = scheduledUpdates.size,
             indexedDocuments = indexState.documentsCount(),
             errors = updateFailuresState.toMap(),
+            segments = 1,
         )
     }
 }

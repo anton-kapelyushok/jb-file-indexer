@@ -13,7 +13,7 @@ import kotlinx.coroutines.selects.select
 import java.util.*
 
 sealed interface DocumentState {
-    data class Indexed(val segment: SegmentState) : DocumentState
+    data class Indexed(val segmentHolder: SegmentHolder) : DocumentState
     data class Scheduled(val update: DocumentMessage)
     data class Running(val cancelToken: CompletableDeferred<Unit>)
     data class Failed(val e: Throwable) : DocumentState
@@ -32,6 +32,9 @@ sealed interface DocumentMessage {
     ) : DocumentMessage
 }
 
+// TODO - is it dumb?
+data class SegmentHolder(var segment: SegmentState)
+
 internal suspend fun segmentedIndexCoordinator(
     state: MutableStateFlow<IndexStatusInfo>,
     searchLockInput: ReceiveChannel<Boolean>,
@@ -39,9 +42,8 @@ internal suspend fun segmentedIndexCoordinator(
     searchInput: ReceiveChannel<SearchExactMessage<Int>>,
 
     createSegmentFromFileConcurrency: Int = 4,
-    readFileConcurrency: Int = 1,
     mergeSegmentsConcurrency: Int = 1,
-    targetSegmentsCount: Int = 16,
+    targetSegmentsCount: Int = 32,
 ) = coroutineScope {
     // region workers
     val createSegmentFromFileInput = Channel<CreateSegmentFromFileInput>()
@@ -57,7 +59,6 @@ internal suspend fun segmentedIndexCoordinator(
                 createSegmentFromFileWorker(
                     createSegmentFromFileInput,
                     createSegmentFromFileOutput,
-                    readFileConcurrency
                 )
             }
         }
@@ -96,7 +97,7 @@ internal suspend fun segmentedIndexCoordinator(
                 documentUpdateInput.onReceive { msg ->
                     debugLog("documentUpdateInput.onReceive ${msg.documentName}")
                     val documentName = msg.documentName
-                    val segment = indexedDocuments[documentName]?.segment
+                    val segment = indexedDocuments[documentName]?.segmentHolder?.segment
                     val shouldWaitForMerge = segment != null && segment !in segments
 
                     if (shouldWaitForMerge) scheduledWaitingDocuments[documentName] = DocumentState.Scheduled(msg)
@@ -115,7 +116,7 @@ internal suspend fun segmentedIndexCoordinator(
                     msg.data
                         .onSuccess { segment ->
                             segments += segment
-                            indexedDocuments[documentName] = DocumentState.Indexed(segment)
+                            indexedDocuments[documentName] = DocumentState.Indexed(SegmentHolder(segment))
                         }
                         .onFailure { e ->
                             failedDocuments[documentName] = DocumentState.Failed(e)
@@ -127,11 +128,13 @@ internal suspend fun segmentedIndexCoordinator(
                     runningMergeSegments -= 1
                     segments += msg.resultSegment
 
+                    val segmentHolder = SegmentHolder(msg.resultSegment)
+
                     msg.resultSegment.docNames.forEach { docName ->
                         val removed = scheduledWaitingDocuments.remove(docName)
                         removed?.let { scheduledReadyDocuments[docName] = it }
 
-                        indexedDocuments[docName] = DocumentState.Indexed(msg.resultSegment)
+                        indexedDocuments[docName] = DocumentState.Indexed(segmentHolder)
                     }
                 }
                 @Suppress("SimplifyBooleanWithConstants")
@@ -156,16 +159,14 @@ internal suspend fun segmentedIndexCoordinator(
                     .forEach { (docName, msg) ->
                         scheduledReadyDocuments.remove(docName)
 
-                        val segment = indexedDocuments[docName]?.segment
-                        if (segment != null) {
+                        val segmentHolder = indexedDocuments[docName]?.segmentHolder
+                        if (segmentHolder != null) {
                             indexedDocuments.remove(docName)
-                            segments -= segment
-                            val newSegment = deleteDocument(segment, docName)
+                            segments -= segmentHolder.segment
+                            val newSegment = deleteDocument(segmentHolder.segment, docName)
                             segments += newSegment
 
-                            getAliveDocuments(newSegment).forEach {
-                                indexedDocuments[it] = DocumentState.Indexed(newSegment)
-                            }
+                            segmentHolder.segment = newSegment
                         }
 
                         if (msg.update is DocumentMessage.Update) {
@@ -180,9 +181,12 @@ internal suspend fun segmentedIndexCoordinator(
             }
 
             run { // run merges
-                while (runningMergeSegments < mergeSegmentsConcurrency && segments.size > targetSegmentsCount) {
+                while (runningMergeSegments < mergeSegmentsConcurrency
+                    && segments.size > targetSegmentsCount
+                    && indexingDocuments.isEmpty()
+                ) {
                     runningMergeSegments++
-                    val segmentsToMerge = segments.take(segments.size - targetSegmentsCount + 1)
+                    val segmentsToMerge = segments.take(minOf(segments.size - targetSegmentsCount + 1, 64))
                     segments -= segmentsToMerge
                     debugLog("before mergeSegmentsInput.send")
                     mergeSegmentsInput.send(MergeSegmentsInput(segmentsToMerge))
@@ -202,7 +206,8 @@ internal suspend fun segmentedIndexCoordinator(
                 runningUpdates = indexingDocuments.size,
                 pendingUpdates = scheduledReadyDocuments.size + scheduledWaitingDocuments.size,
                 indexedDocuments = indexedDocuments.size,
-                errors = failedDocuments.mapValues { (_, v) -> v.e }
+                errors = failedDocuments.mapValues { (_, v) -> v.e },
+                segments = segments.size
             )
         }
         // endregion
