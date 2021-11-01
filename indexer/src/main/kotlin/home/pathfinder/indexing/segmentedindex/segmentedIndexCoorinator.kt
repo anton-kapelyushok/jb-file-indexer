@@ -1,15 +1,13 @@
 package home.pathfinder.indexing.segmentedindex
 
-import home.pathfinder.indexing.Posting
-import home.pathfinder.indexing.SearchExactMessage
-import home.pathfinder.indexing.debugLog
-import home.pathfinder.indexing.handleFlowFromActorMessage
+import home.pathfinder.indexing.*
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import java.util.*
@@ -35,6 +33,7 @@ sealed interface DocumentMessage {
 }
 
 internal suspend fun segmentedIndexCoordinator(
+    state: MutableStateFlow<IndexStatusInfo>,
     searchLockInput: ReceiveChannel<Boolean>,
     documentUpdateInput: ReceiveChannel<DocumentMessage>,
     searchInput: ReceiveChannel<SearchExactMessage<Int>>,
@@ -155,9 +154,11 @@ internal suspend fun segmentedIndexCoordinator(
                 scheduledReadyDocuments.entries
                     .take(readFileConcurrency - indexingDocuments.size)
                     .forEach { (docName, msg) ->
-                        val segment = indexedDocuments[docName]?.segment
                         scheduledReadyDocuments.remove(docName)
+
+                        val segment = indexedDocuments[docName]?.segment
                         if (segment != null) {
+                            indexedDocuments.remove(docName)
                             segments -= segment
                             val newSegment = deleteDocument(segment, docName)
                             segments += newSegment
@@ -195,6 +196,14 @@ internal suspend fun segmentedIndexCoordinator(
                     }
                 }
             }
+
+            state.value = IndexStatusInfo(
+                searchLocked = expectingUpdates,
+                runningUpdates = indexingDocuments.size,
+                pendingUpdates = scheduledReadyDocuments.size + scheduledWaitingDocuments.size,
+                indexedDocuments = indexedDocuments.size,
+                errors = failedDocuments.mapValues { (_, v) -> v.e }
+            )
         }
         // endregion
     } finally {

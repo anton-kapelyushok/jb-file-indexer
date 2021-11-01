@@ -30,7 +30,8 @@ internal class SegmentedIndex : Index<Int>, SearchExact<Int> {
         flowFromActor(searchInput) { cancel, data -> SearchExactMessage(term, data, cancel) }
 
     override suspend fun go(scope: CoroutineScope) =
-        scope.launch { segmentedIndexCoordinator(searchLockInput, documentUpdateInput, searchInput) }
+        scope.launch { segmentedIndexCoordinator(_state, searchLockInput, documentUpdateInput, searchInput) }
 
-    override val state: StateFlow<IndexStatusInfo> = MutableStateFlow(IndexStatusInfo.empty())
+    private val _state = MutableStateFlow(IndexStatusInfo.empty())
+    override val state: StateFlow<IndexStatusInfo> get() = _state
 }
