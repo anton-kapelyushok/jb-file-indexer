@@ -123,6 +123,9 @@ fun main() {
                     }
                 }
             }
+        } catch (e: Throwable) {
+            e.printStackTrace()
+            throw e
         } finally {
             requestInput.cancel()
             indexerJob.cancel()

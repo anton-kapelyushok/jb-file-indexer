@@ -18,7 +18,7 @@ interface FileIndexer : Actor {
      * Function call returns (almost) immediately, update is scheduled.
      * Search is blocked until update comes through.
      */
-    suspend fun updateContentRoots(newRoots: Set<String>, ignoredRoots: Set<String>)
+    suspend fun updateContentRoots(newRoots: Set<String>, newIgnoredRoots: Set<String>)
 
     suspend fun searchExact(term: String): Flow<SearchResultEntry<Int>>
 
