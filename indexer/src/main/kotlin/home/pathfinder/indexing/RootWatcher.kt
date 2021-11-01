@@ -13,6 +13,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.io.path.fileSize
 import kotlin.random.Random
 
 private val Path.canonicalPath: String get() = toFile().canonicalPath
@@ -44,6 +46,8 @@ internal class RootWatcher(
     private val root = Paths.get(watchedRoot.root).canonicalPath
     private val ignoredRoots = TreeSet(watchedRoot.ignoredRoots.map { Paths.get(it).canonicalPath })
     private val internalEvents = Channel<RootWatcherEvent>()
+
+    private val initializing = AtomicBoolean(true)
 
     override suspend fun go(
         scope: CoroutineScope
@@ -104,9 +108,10 @@ internal class RootWatcher(
                 }
 
                 watcher = watcherBuildJob.await()
+                initializing.set(false)
 
                 if (!cancel.isCompleted && watcher != null) {
-                    runInterruptible { emitInitialDirectoryStructure() }
+//                    runInterruptible { emitInitialDirectoryStructure() }
                     emitStarted()
 
                     val job = launch(Dispatchers.IO) {
@@ -149,18 +154,27 @@ internal class RootWatcher(
         return DirectoryWatcher.builder()
             .logger(NOPLogger.NOP_LOGGER)
             .path(Paths.get(root))
-            .fileHasher {
+            .fileHasher { path ->
                 // A hack to fast cancel watcher.build()
                 if (Thread.interrupted()) {
                     throw InterruptedException()
                 }
+
+                // A hack to speed up initialization process
+                if (initializing.get()) {
+                    if (!isIgnored(path))
+                        runBlocking {
+                            emitFileAdded(path.canonicalPath)
+                        }
+                }
+
                 FileHash.fromBytes(Random.nextBytes(16))
             }
             .listener(object : DirectoryChangeListener {
                 override fun onEvent(event: DirectoryChangeEvent) {
                     runBlocking {
                         val path = event.path().canonicalPath
-                        if (isIgnored(path)) return@runBlocking
+                        if (isIgnored(event.path())) return@runBlocking
 
                         val isRegularFile = !event.isDirectory
                         @Suppress("WHEN_ENUM_CAN_BE_NULL_IN_JAVA")
@@ -195,21 +209,26 @@ internal class RootWatcher(
             .use { stream ->
                 stream
                     .filter(Files::isRegularFile)
-                    .map { it.canonicalPath }
                     .filter { !isIgnored(it) }
                     .forEach {
                         runBlocking {
-                            emitFileAdded(it)
+                            emitFileAdded(it.canonicalPath)
                         }
                     }
             }
     }
 
-    private fun isIgnored(path: String): Boolean {
-        val closestIgnoredParent = ignoredRoots.floor(path)
-        if (closestIgnoredParent != null && path.startsWith(closestIgnoredParent)) {
+    private fun isIgnored(path: Path): Boolean {
+        val canonicalPath = path.canonicalPath
+        val closestIgnoredParent = ignoredRoots.floor(canonicalPath)
+        if (closestIgnoredParent != null && canonicalPath.startsWith(closestIgnoredParent)) {
             return true
         }
+
+        if (path.fileSize() > 10_000_000) {
+            return true
+        }
+
         return false
     }
 

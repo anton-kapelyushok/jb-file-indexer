@@ -40,7 +40,7 @@ internal suspend fun segmentedIndexCoordinator(
 
     createSegmentFromFileConcurrency: Int = 4,
     readFileConcurrency: Int = 1,
-    mergeSegmentsConcurrency: Int = 2,
+    mergeSegmentsConcurrency: Int = 1,
     targetSegmentsCount: Int = 16,
 ) = coroutineScope {
     // region workers
@@ -152,7 +152,7 @@ internal suspend fun segmentedIndexCoordinator(
 
             run { // run updates
                 scheduledReadyDocuments.entries
-                    .take(readFileConcurrency - indexingDocuments.size)
+                    .take(createSegmentFromFileConcurrency - indexingDocuments.size)
                     .forEach { (docName, msg) ->
                         scheduledReadyDocuments.remove(docName)
 

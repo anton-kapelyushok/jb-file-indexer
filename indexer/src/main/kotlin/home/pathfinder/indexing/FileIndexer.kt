@@ -117,8 +117,6 @@ internal class FileIndexerImpl(
             watcherMap[it] = mutableSetOf()
         }
 
-        // TODO: check ignoredRoots not overlapping + ignoredRoots are inside normalizedRoots
-
         normalizedIgnoredRoots.forEach {
             if ((normalizedIgnoredRoots.higher(it) ?: "").startsWith(it)) {
                 error("Cannot update roots because ignore root $it contains ${normalizedIgnoredRoots.higher(it)!!}")

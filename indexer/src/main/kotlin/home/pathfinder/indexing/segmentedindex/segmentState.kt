@@ -75,6 +75,8 @@ fun mergeSegments(lSegment: SegmentState, rSegment: SegmentState): SegmentState 
             .sorted()
             .toTypedArray()
 
+    val docNameMap = newDocNames.indices.associateBy { newDocNames[it] }
+
     val newDocStates = BooleanArray(newDocNames.size) { true }
 
     val newAlivePostings = lSegment.alivePostings + rSegment.alivePostings
@@ -102,7 +104,7 @@ fun mergeSegments(lSegment: SegmentState, rSegment: SegmentState): SegmentState 
             newTermArray[last] = termId
 
             val docName = segment.docNames[segment.docArray[i]]
-            val docId = newDocNames.binarySearch(docName)
+            val docId = docNameMap[docName]!!
 
             newDocArray[last] = docId
 
