@@ -18,7 +18,15 @@ suspend fun mergeSegmentsWorker(
     output: SendChannel<MergeSegmentsResult>,
 ) = coroutineScope {
     for ((segmentsToMerge) in input) {
-        val segments = segmentsToMerge.toSortedSet(compareBy({ it.alivePostings }, { System.identityHashCode(it) }))
+        val segments = segmentsToMerge.toSortedSet(
+            compareBy({
+                if (it.dataTermIds.isEmpty()) 0.0
+                else it.alivePostings.toDouble() / it.dataTermIds.size * (it.termData.size + it.alivePostings * 12)
+            },
+                {
+                    System.identityHashCode(it)
+                })
+        )
         while (segments.size > 1) {
             val (segment1, segment2) = segments.take(2)
             val newSegment = mergeSegments(segment1, segment2)

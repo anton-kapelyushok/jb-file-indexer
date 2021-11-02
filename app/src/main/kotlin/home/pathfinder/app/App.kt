@@ -66,6 +66,15 @@ fun main() {
                         "find" -> {
                             println("searching, press any key to cancel")
                             val searchJob = launch {
+                                val statusJob = launch {
+                                    while (true) {
+                                        delay(1000)
+                                        println("###############")
+                                        println(fileIndexer.state.value)
+                                        println()
+                                    }
+                                }
+
                                 var count = 0
                                 val duration = measureTimeMillis {
                                     if (parts.size != 2) return@measureTimeMillis
@@ -75,6 +84,7 @@ fun main() {
                                             count++
                                         }
                                 }
+                                statusJob.cancel()
                                 if (count == 0) println("Nothing found")
                                 else {
                                     println()

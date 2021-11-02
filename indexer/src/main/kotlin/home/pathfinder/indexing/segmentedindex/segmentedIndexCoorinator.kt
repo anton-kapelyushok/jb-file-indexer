@@ -42,7 +42,7 @@ internal suspend fun segmentedIndexCoordinator(
 
     createSegmentFromFileConcurrency: Int = 4,
     mergeSegmentsConcurrency: Int = 1,
-    targetSegmentsCount: Int = 16,
+    targetSegmentsCount: Int = 64,
 ) = coroutineScope {
     // region workers
     val createSegmentFromFileInput = Channel<CreateSegmentFromFileInput>()
@@ -70,7 +70,16 @@ internal suspend fun segmentedIndexCoordinator(
         // endregion
 
         // region state
-        val segments = TreeSet<SegmentState>(compareBy({ it.alivePostings }, { System.identityHashCode(it) }))
+        val segments = TreeSet<SegmentState>(
+            // TODO
+            compareBy({
+                if (it.dataTermIds.isEmpty()) 0.0
+                else it.alivePostings.toDouble() / it.dataTermIds.size * it.termData.size
+            },
+                {
+                    System.identityHashCode(it)
+                })
+        )
         var runningMergeSegments = 0
 
         val indexedDocuments = mutableMapOf<String, DocumentState.Indexed>()
@@ -182,10 +191,13 @@ internal suspend fun segmentedIndexCoordinator(
             run { // run merges
                 while (runningMergeSegments < mergeSegmentsConcurrency
                     && segments.size > targetSegmentsCount
-                    && indexingDocuments.isEmpty()
+//                    && indexingDocuments.isEmpty()
                 ) {
                     runningMergeSegments++
-                    val segmentsToMerge = segments.take(minOf(segments.size - targetSegmentsCount + 1, 64))
+                    val segmentsToMerge =
+                        segments.take(
+                            maxOf(minOf(segments.size - targetSegmentsCount + 1, 64, segments.size / 16), 2)
+                        )
                     segments -= segmentsToMerge
                     debugLog("before mergeSegmentsInput.send")
                     mergeSegmentsInput.send(MergeSegmentsInput(segmentsToMerge))

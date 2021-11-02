@@ -28,11 +28,7 @@ data class SegmentState(
 }
 
 fun createSegment(document: String, documentData: List<Posting<Int>>): SegmentState {
-    val uniqueTerms = documentData
-        .asSequence()
-        .map { it.term }
-        .toSortedSet()
-        .toList()
+    val uniqueTerms = documentData.map { it.term }.toSet().sorted()
 
     val dataTermIds = IntArray(documentData.size)
     val dataDocIds = IntArray(documentData.size)
@@ -41,8 +37,8 @@ fun createSegment(document: String, documentData: List<Posting<Int>>): SegmentSt
     documentData
         .sortedBy { it.term }
         .forEachIndexed { idx, (term, termData) ->
-            val termV = uniqueTerms.binarySearch(term)
-            dataTermIds[idx] = termV
+            val termId = uniqueTerms.binarySearch(term)
+            dataTermIds[idx] = termId
             dataDocIds[idx] = 0
             dataTermData[idx] = termData
         }
@@ -73,7 +69,7 @@ private fun toStringData(uniqueTerms: List<String>): Pair<ByteArray, IntArray> {
         if (i > 0) termOffsets[i] = termOffsets[i - 1] + termsAsBytes[i - 1].size
         System.arraycopy(termsAsBytes[i], 0, termData, termOffsets[i], termsAsBytes[i].size)
     }
-    return Pair(termData, termOffsets)
+    return termData to termOffsets
 }
 
 fun SegmentState.deleteDocument(document: String): SegmentState {
@@ -216,7 +212,10 @@ fun SegmentState.find(term: String): List<SearchResultEntry<Int>> {
 
     val result = mutableListOf<SearchResultEntry<Int>>()
     while (i in dataTermIds.indices) {
-        if (!documentsState[dataDocIds[i]]) continue
+        if (!documentsState[dataDocIds[i]]) {
+            i++
+            continue
+        }
         val currentTermId = dataTermIds[i]
         val current = termAt(currentTermId)
         if (current != term) break
@@ -232,6 +231,8 @@ fun SegmentState.find(term: String): List<SearchResultEntry<Int>> {
 }
 
 private fun binarySearch(start: Int, end: Int, condition: (Int) -> Boolean): Int {
+    if (end < 0) return -1
+
     var l = start
     var r = end
 
