@@ -28,6 +28,8 @@ data class SegmentState(
 }
 
 fun createSegment(document: String, documentData: List<Posting<Int>>): SegmentState {
+//    return SegmentState(arrayOf(), booleanArrayOf(), byteArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), 0)
+
     val uniqueTerms = documentData.map { it.term }.toSet().sorted()
 
     val dataTermIds = IntArray(documentData.size)

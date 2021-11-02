@@ -14,8 +14,11 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.random.Random
+
+private val enableHack = true
 
 private val Path.canonicalPath: String get() = toFile().canonicalPath
 
@@ -45,7 +48,7 @@ internal class RootWatcher(
 
     private val root = Paths.get(watchedRoot.root).canonicalPath
     private val ignoredRoots = TreeSet(watchedRoot.ignoredRoots.map { Paths.get(it).canonicalPath })
-    private val internalEvents = Channel<RootWatcherEvent>()
+    private val internalEvents = Channel<RootWatcherEvent>(5000)
 
     private val initializing = AtomicBoolean(true)
 
@@ -111,7 +114,7 @@ internal class RootWatcher(
                 initializing.set(false)
 
                 if (!cancel.isCompleted && watcher != null) {
-//                    runInterruptible { emitInitialDirectoryStructure() }
+                    if (!enableHack) runInterruptible { emitInitialDirectoryStructure() }
                     emitStarted()
 
                     val job = launch(Dispatchers.IO) {
@@ -161,7 +164,7 @@ internal class RootWatcher(
                 }
 
                 // A hack to speed up initialization process
-                if (initializing.get()) {
+                if (enableHack && initializing.get()) {
                     if (!isIgnored(path))
                         runBlocking {
                             emitFileAdded(path.canonicalPath)
@@ -225,7 +228,7 @@ internal class RootWatcher(
             return true
         }
 
-        if (path.fileSize() > 10_000_000) {
+        if (path.exists() && path.fileSize() > 10_000_000) {
             return true
         }
 

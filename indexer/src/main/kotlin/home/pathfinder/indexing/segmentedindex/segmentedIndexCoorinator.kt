@@ -108,6 +108,8 @@ internal suspend fun segmentedIndexCoordinator(
                     val segment = indexedDocuments[documentName]?.segmentHolder?.segment
                     val shouldWaitForMerge = segment != null && segment !in segments
 
+
+                    // TODO cancel indexing
                     if (shouldWaitForMerge) scheduledWaitingDocuments[documentName] = DocumentState.Scheduled(msg)
                     else scheduledReadyDocuments[documentName] = DocumentState.Scheduled(msg)
                 }
@@ -163,6 +165,7 @@ internal suspend fun segmentedIndexCoordinator(
 
             run { // run updates
                 scheduledReadyDocuments.entries
+                    // TODO filter out indexing
                     .take(createSegmentFromFileConcurrency - indexingDocuments.size)
                     .forEach { (docName, msg) ->
                         scheduledReadyDocuments.remove(docName)
