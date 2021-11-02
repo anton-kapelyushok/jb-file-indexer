@@ -1,6 +1,5 @@
 package home.pathfinder.indexing.segmentedindex
 
-import home.pathfinder.indexing.debugLog
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope

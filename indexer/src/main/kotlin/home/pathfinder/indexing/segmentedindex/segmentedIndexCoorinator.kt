@@ -32,7 +32,6 @@ sealed interface DocumentMessage {
     ) : DocumentMessage
 }
 
-// TODO - is it dumb?
 data class SegmentHolder(var segment: SegmentState)
 
 internal suspend fun segmentedIndexCoordinator(
@@ -43,7 +42,7 @@ internal suspend fun segmentedIndexCoordinator(
 
     createSegmentFromFileConcurrency: Int = 4,
     mergeSegmentsConcurrency: Int = 1,
-    targetSegmentsCount: Int = 32,
+    targetSegmentsCount: Int = 16,
 ) = coroutineScope {
     // region workers
     val createSegmentFromFileInput = Channel<CreateSegmentFromFileInput>()
@@ -130,7 +129,7 @@ internal suspend fun segmentedIndexCoordinator(
 
                     val segmentHolder = SegmentHolder(msg.resultSegment)
 
-                    msg.resultSegment.docNames.forEach { docName ->
+                    msg.resultSegment.getAliveDocuments().forEach { docName ->
                         val removed = scheduledWaitingDocuments.remove(docName)
                         removed?.let { scheduledReadyDocuments[docName] = it }
 
@@ -163,7 +162,7 @@ internal suspend fun segmentedIndexCoordinator(
                         if (segmentHolder != null) {
                             indexedDocuments.remove(docName)
                             segments -= segmentHolder.segment
-                            val newSegment = deleteDocument(segmentHolder.segment, docName)
+                            val newSegment = segmentHolder.segment.deleteDocument(docName)
                             segments += newSegment
 
                             segmentHolder.segment = newSegment
@@ -191,7 +190,7 @@ internal suspend fun segmentedIndexCoordinator(
                     debugLog("before mergeSegmentsInput.send")
                     mergeSegmentsInput.send(MergeSegmentsInput(segmentsToMerge))
                     segmentsToMerge.forEach { segment ->
-                        getAliveDocuments(segment).forEach { docName ->
+                        segment.getAliveDocuments().forEach { docName ->
                             val removed = scheduledReadyDocuments.remove(docName)
                             if (removed != null) {
                                 scheduledWaitingDocuments[docName] = removed
@@ -224,7 +223,7 @@ private fun CoroutineScope.handleSearchRequest(msg: SearchExactMessage<Int>, seg
         try {
             handleFlowFromActorMessage(msg) { result ->
                 segments.forEach { segment ->
-                    findInSegment(segment, msg.term).forEach {
+                    segment.find(msg.term).forEach {
                         result.send(it)
                     }
                 }
