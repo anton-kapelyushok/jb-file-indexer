@@ -44,7 +44,6 @@ internal suspend fun segmentedIndexCoordinator(
     mergeSegmentsConcurrency: Int = 4,
     targetSegmentsCount: Int = 32,
 ) = coroutineScope {
-    // region workers
     val createSegmentFromFileInput = Channel<CreateSegmentFromFileInput>()
     val createSegmentFromFileOutput = Channel<CreateSegmentFromFileResult>()
 
@@ -52,7 +51,7 @@ internal suspend fun segmentedIndexCoordinator(
     val mergeSegmentsResult = Channel<MergeSegmentsResult>()
 
     try {
-
+        // region workers
         repeat(createSegmentFromFileConcurrency) {
             launch {
                 createSegmentFromFileWorker(
@@ -75,10 +74,9 @@ internal suspend fun segmentedIndexCoordinator(
             compareBy({
                 if (it.dataTermIds.isEmpty()) 0.0
                 else it.alivePostings.toDouble() / it.dataTermIds.size * it.termData.size
-            },
-                {
-                    System.identityHashCode(it)
-                })
+            }, {
+                it.id
+            })
         )
         var runningMergeSegments = 0
 
@@ -194,7 +192,6 @@ internal suspend fun segmentedIndexCoordinator(
             run { // run merges
                 while (runningMergeSegments < mergeSegmentsConcurrency
                     && segments.size > targetSegmentsCount
-//                    && indexingDocuments.isEmpty()
                 ) {
                     runningMergeSegments++
                     val segmentsToMerge = segments.take(2)

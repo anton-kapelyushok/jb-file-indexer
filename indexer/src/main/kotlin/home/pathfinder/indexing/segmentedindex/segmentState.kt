@@ -2,9 +2,14 @@ package home.pathfinder.indexing.segmentedindex
 
 import home.pathfinder.indexing.Posting
 import home.pathfinder.indexing.SearchResultEntry
+import java.util.concurrent.atomic.AtomicLong
+
+private val segmentIdSequence = AtomicLong(0L)
 
 @Suppress("ArrayInDataClass")
 data class SegmentState(
+    val id: Long,
+
     val documents: Array<String>,
     val documentsState: BooleanArray,
 
@@ -28,7 +33,7 @@ data class SegmentState(
 }
 
 fun createSegment(document: String, documentData: List<Posting<Int>>): SegmentState {
-//    return SegmentState(arrayOf(), booleanArrayOf(), byteArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), 0)
+//    return SegmentState(segmentIdSequence.incrementAndGet(), arrayOf(), booleanArrayOf(), byteArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), 0)
 
     val uniqueTerms = documentData.map { it.term }.toSet().sorted()
 
@@ -48,6 +53,8 @@ fun createSegment(document: String, documentData: List<Posting<Int>>): SegmentSt
     val (termData, termOffsets) = toStringData(uniqueTerms)
 
     return SegmentState(
+        id = segmentIdSequence.incrementAndGet(),
+
         documents = arrayOf(document),
         documentsState = booleanArrayOf(true),
 
@@ -111,10 +118,13 @@ fun mergeSegments(segment1: SegmentState, segment2: SegmentState): SegmentState 
         var lastParsedTermId = -1
         var lastParsedTerm = ""
 
-        fun isAlive() = segment.documentsState[segment.dataDocIds[i]]
+        fun isPostingDocumentAlive() = segment.documentsState[segment.dataDocIds[i]]
+
         fun reachedEnd() = i >= segment.dataTermIds.size
-        fun moveToNext() = i++
-        fun addFromCurrent() {
+
+        fun moveToNextPosting() = i++
+
+        fun addCurrentPosting() {
             val term = currentTerm()
             if (newTerms.isEmpty() || term != newTerms.last()) {
                 newTerms.add(term)
@@ -150,26 +160,23 @@ fun mergeSegments(segment1: SegmentState, segment2: SegmentState): SegmentState 
     run {
         while (!seg1.reachedEnd() || !seg2.reachedEnd()) {
             when {
-                !seg1.reachedEnd() && !seg1.isAlive() -> seg1.moveToNext()
-                !seg2.reachedEnd() && !seg2.isAlive() -> seg2.moveToNext()
+                !seg1.reachedEnd() && !seg1.isPostingDocumentAlive() -> seg1.moveToNextPosting()
+                !seg2.reachedEnd() && !seg2.isPostingDocumentAlive() -> seg2.moveToNextPosting()
                 seg1.reachedEnd() -> {
-                    seg2.addFromCurrent()
-                    seg2.moveToNext()
+                    seg2.addCurrentPosting()
+                    seg2.moveToNextPosting()
                 }
                 seg2.reachedEnd() -> {
-                    seg1.addFromCurrent()
-                    seg1.moveToNext()
+                    seg1.addCurrentPosting()
+                    seg1.moveToNextPosting()
                 }
                 else -> {
-                    val term1 = seg1.currentTerm()
-                    val term2 = seg2.currentTerm()
-
-                    if (term1 < term2) {
-                        seg1.addFromCurrent()
-                        seg1.moveToNext()
+                    if (seg1.currentTerm() < seg2.currentTerm()) {
+                        seg1.addCurrentPosting()
+                        seg1.moveToNextPosting()
                     } else {
-                        seg2.addFromCurrent()
-                        seg2.moveToNext()
+                        seg2.addCurrentPosting()
+                        seg2.moveToNextPosting()
                     }
                 }
             }
@@ -179,6 +186,8 @@ fun mergeSegments(segment1: SegmentState, segment2: SegmentState): SegmentState 
     val (termData, termOffsets) = toStringData(newTerms)
 
     return SegmentState(
+        id = segmentIdSequence.incrementAndGet(),
+
         documents = newDocuments,
         documentsState = BooleanArray(newDocuments.size) { true },
         termData = termData,
@@ -233,7 +242,7 @@ fun SegmentState.find(term: String): List<SearchResultEntry<Int>> {
 }
 
 private fun binarySearch(start: Int, end: Int, condition: (Int) -> Boolean): Int {
-    if (end < 0) return -1
+    if (end < start) return -1
 
     var l = start
     var r = end
