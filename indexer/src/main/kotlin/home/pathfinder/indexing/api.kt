@@ -47,7 +47,8 @@ data class IndexStatusInfo(
     val pendingUpdates: Int,
     val indexedDocuments: Int,
     val errors: Map<DocumentName, Throwable>,
-    val segments: Int
+    val segments: Int,
+    val segmentMergesInProgress: Int,
 ) {
     companion object {
         fun empty() = IndexStatusInfo(
@@ -56,7 +57,8 @@ data class IndexStatusInfo(
             runningUpdates = 0,
             indexedDocuments = 0,
             errors = emptyMap(),
-            segments = 0
+            segments = 0,
+            segmentMergesInProgress = 0,
         )
     }
 }

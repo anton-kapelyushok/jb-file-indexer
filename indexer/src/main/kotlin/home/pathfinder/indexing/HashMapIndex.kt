@@ -282,6 +282,7 @@ internal class IndexOrchestrator<TermData : Any>(
             indexedDocuments = indexState.documentsCount(),
             errors = updateFailuresState.toMap(),
             segments = 1,
+            segmentMergesInProgress = 0,
         )
     }
 }

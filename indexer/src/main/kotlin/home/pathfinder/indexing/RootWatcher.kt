@@ -18,7 +18,7 @@ import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.random.Random
 
-private val enableHack = true
+private val enableInitialEmitFromFileHasherHack = true
 
 private val Path.canonicalPath: String get() = toFile().canonicalPath
 
@@ -48,7 +48,7 @@ internal class RootWatcher(
 
     private val root = Paths.get(watchedRoot.root).canonicalPath
     private val ignoredRoots = TreeSet(watchedRoot.ignoredRoots.map { Paths.get(it).canonicalPath })
-    private val internalEvents = Channel<RootWatcherEvent>(5000)
+    private val internalEvents = Channel<RootWatcherEvent>()
 
     private val initializing = AtomicBoolean(true)
 
@@ -114,12 +114,14 @@ internal class RootWatcher(
                 initializing.set(false)
 
                 if (!cancel.isCompleted && watcher != null) {
-                    if (!enableHack) runInterruptible { emitInitialDirectoryStructure() }
+                    if (!enableInitialEmitFromFileHasherHack) runInterruptible { emitInitialDirectoryStructure() }
                     emitStarted()
 
                     val job = launch(Dispatchers.IO) {
                         try {
                             runInterruptible {
+                                // TODO
+                                println("WATCH!")
                                 watcher.watch()
                             }
                         } catch (e: ClosedWatchServiceException) {
@@ -164,10 +166,10 @@ internal class RootWatcher(
                 }
 
                 // A hack to speed up initialization process
-                if (enableHack && initializing.get()) {
+                if (enableInitialEmitFromFileHasherHack && initializing.get()) {
                     if (!isIgnored(path))
                         runBlocking {
-                            emitFileAdded(path.canonicalPath)
+                            emitFileAdded(path.toString())
                         }
                 }
 
@@ -215,14 +217,14 @@ internal class RootWatcher(
                     .filter { !isIgnored(it) }
                     .forEach {
                         runBlocking {
-                            emitFileAdded(it.canonicalPath)
+                            emitFileAdded(it.toString())
                         }
                     }
             }
     }
 
     private fun isIgnored(path: Path): Boolean {
-        val canonicalPath = path.canonicalPath
+        val canonicalPath = path.toString()
         val closestIgnoredParent = ignoredRoots.floor(canonicalPath)
         if (closestIgnoredParent != null && canonicalPath.startsWith(closestIgnoredParent)) {
             return true

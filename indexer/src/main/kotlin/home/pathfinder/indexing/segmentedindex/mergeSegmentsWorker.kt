@@ -20,8 +20,7 @@ suspend fun mergeSegmentsWorker(
     for ((segmentsToMerge) in input) {
         val segments = segmentsToMerge.toSortedSet(
             compareBy({
-                if (it.dataTermIds.isEmpty()) 0.0
-                else it.alivePostings.toDouble() / it.dataTermIds.size * (it.termData.size + it.alivePostings * 12)
+                it.alivePostings
             },
                 {
                     System.identityHashCode(it)

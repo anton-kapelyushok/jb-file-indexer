@@ -40,9 +40,9 @@ internal suspend fun segmentedIndexCoordinator(
     documentUpdateInput: ReceiveChannel<DocumentMessage>,
     searchInput: ReceiveChannel<SearchExactMessage<Int>>,
 
-    createSegmentFromFileConcurrency: Int = 4,
-    mergeSegmentsConcurrency: Int = 1,
-    targetSegmentsCount: Int = 64,
+    createSegmentFromFileConcurrency: Int = 16,
+    mergeSegmentsConcurrency: Int = 4,
+    targetSegmentsCount: Int = 32,
 ) = coroutineScope {
     // region workers
     val createSegmentFromFileInput = Channel<CreateSegmentFromFileInput>()
@@ -197,10 +197,7 @@ internal suspend fun segmentedIndexCoordinator(
 //                    && indexingDocuments.isEmpty()
                 ) {
                     runningMergeSegments++
-                    val segmentsToMerge =
-                        segments.take(
-                            maxOf(minOf(segments.size - targetSegmentsCount + 1, 64, segments.size / 16), 2)
-                        )
+                    val segmentsToMerge = segments.take(2)
                     segments -= segmentsToMerge
                     debugLog("before mergeSegmentsInput.send")
                     mergeSegmentsInput.send(MergeSegmentsInput(segmentsToMerge))
@@ -221,7 +218,8 @@ internal suspend fun segmentedIndexCoordinator(
                 pendingUpdates = scheduledReadyDocuments.size + scheduledWaitingDocuments.size,
                 indexedDocuments = indexedDocuments.size,
                 errors = failedDocuments.mapValues { (_, v) -> v.e },
-                segments = segments.size
+                segments = segments.size,
+                segmentMergesInProgress = runningMergeSegments,
             )
         }
         // endregion
