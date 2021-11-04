@@ -150,7 +150,7 @@ class RootWatcherTest {
         path: String,
         fn: suspend (result: RootWatcherResult, cancel: () -> Unit) -> T
     ): T {
-        val rw = RootWatcher(WatchedRoot(path, setOf()))
+        val rw = RootWatcher(WatchedRoot(path, setOf(), setOf(path)))
         val job = launch { rw.go(this) }
 
         return try {

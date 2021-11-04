@@ -12,15 +12,12 @@ import java.nio.file.ClosedWatchServiceException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.random.Random
 
 private val enableInitialEmitFromFileHasherHack = true
-
-private val Path.canonicalPath: String get() = toFile().canonicalPath
 
 internal sealed interface RootWatcherEvent {
     sealed interface RootWatcherLifeCycleEvent : RootWatcherEvent
@@ -46,8 +43,8 @@ internal class RootWatcher(
     val events = Channel<RootWatcherEvent>()
 
     private val root = Paths.get(watchedRoot.root).canonicalPath
-    private val ignoredRoots = TreeSet(watchedRoot.ignoredRoots.map { Paths.get(it).canonicalPath })
-    private val actualRoots = TreeSet(watchedRoot.actualRoots.map { Paths.get(it).canonicalPath })
+    private val ignoredRoots = PathTree(watchedRoot.ignoredRoots.map { Paths.get(it).canonicalPath })
+    private val actualRoots = PathTree(watchedRoot.actualRoots.map { Paths.get(it).canonicalPath })
     private val internalEvents = Channel<RootWatcherEvent>()
 
     private val initializing = AtomicBoolean(true)
@@ -231,15 +228,9 @@ internal class RootWatcher(
 
     private fun isIgnored(path: Path): Boolean {
         val canonicalPath = path.toString()
-        val closestIgnoredParent = ignoredRoots.floor(canonicalPath)
-        if (closestIgnoredParent != null && canonicalPath.startsWith(closestIgnoredParent)) {
-            return true
-        }
 
-        val closestActualParent = actualRoots.floor(canonicalPath)
-        if (closestActualParent == null || !canonicalPath.startsWith(closestActualParent)) {
-            return true
-        }
+        if (ignoredRoots.containsPathOrItsParent(canonicalPath)) return true
+        if (!actualRoots.containsPathOrItsParent(canonicalPath)) return true
 
         if (path.exists() && path.fileSize() > 10_000_000) {
             return true

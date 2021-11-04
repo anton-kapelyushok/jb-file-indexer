@@ -103,12 +103,13 @@ internal class FileIndexerImpl(
     override val state = MutableStateFlow(FileIndexerStatusInfo.empty())
 
     override suspend fun updateContentRoots(newRoots: Set<String>, newIgnoredRoots: Set<String>) {
-        val normalizedRoots = TreeSet(newRoots.map { File(it).canonicalPath })
-        val normalizedIgnoredRoots = TreeSet(newIgnoredRoots.map { File(it).canonicalPath })
+        val normalizedRoots = PathTree(newRoots.map { File(it).canonicalPath })
+        val normalizedIgnoredRoots = PathTree(newIgnoredRoots.map { File(it).canonicalPath })
 
         normalizedRoots.forEach { // check no intersections
-            if ((normalizedRoots.higher(it) ?: "").startsWith(it)) {
-                error("Cannot update roots because $it contains ${normalizedRoots.higher(it)!!}")
+            val parent = normalizedRoots.parentOf(it)
+            if (parent != null) {
+                error("Cannot update roots because $parent contains $it")
             }
         }
 
@@ -117,20 +118,7 @@ internal class FileIndexerImpl(
         val fileParents = fileRootPaths.map { it.parent.toString() }
         val directoryRoots = directoryRootPaths.map { it.toString() }
 
-        val minimalRoots = TreeSet<String>()
-        minimalRoots.addAll(directoryRootPaths.map { it.toString() })
-
-        for (root in (directoryRoots + fileParents)) {
-            if (root in minimalRoots) continue
-            val bigger = minimalRoots.lower(root)
-            if (bigger != null && root.startsWith(bigger)) continue
-
-            val smaller = minimalRoots.higher(root)
-            if (smaller != null && smaller.startsWith(root)) {
-                minimalRoots -= smaller
-            }
-            minimalRoots.add(root)
-        }
+        val minimalRoots = minimalRootsTree((directoryRoots + fileParents))
 
         data class WatcherBuilder(
             val ignoredRoots: MutableSet<String> = mutableSetOf(),
@@ -141,18 +129,17 @@ internal class FileIndexerImpl(
         minimalRoots.forEach { watcherMap[it] = WatcherBuilder() }
 
         normalizedIgnoredRoots.forEach {
-            if ((normalizedIgnoredRoots.higher(it) ?: "").startsWith(it)) {
-                error("Cannot update roots because ignore root $it contains ${normalizedIgnoredRoots.higher(it)!!}")
+            if (normalizedIgnoredRoots.containsParentOf(it)) {
+                error("Cannot update roots because ignore root $it contains ${normalizedIgnoredRoots.parentOf(it)!!}")
             }
 
-            val parent = normalizedRoots.lower(it)
-            if (parent == null || !it.startsWith(parent)) error("Ignored root $it is not part of any parent")
+            normalizedRoots.parentOf(it) ?: error("Ignored root $it is not part of any parent")
 
-            watcherMap.lowerEntry(it)!!.value.ignoredRoots += it
+            watcherMap[minimalRoots.parentOf(it)]!!.ignoredRoots += it
         }
 
         (directoryRoots + fileRoots).forEach {
-            watcherMap.floorEntry(it).value.actualRoots += it
+            watcherMap[minimalRoots.pathOrItsParent(it)]!!.actualRoots += it
         }
 
         indexerEvents.send(IndexerEvent.UpdateRoots(watcherMap.entries
