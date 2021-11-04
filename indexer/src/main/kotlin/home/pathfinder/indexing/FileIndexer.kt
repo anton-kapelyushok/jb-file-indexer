@@ -9,7 +9,9 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
+import java.nio.file.Paths
 import java.util.*
+import kotlin.io.path.isRegularFile
 
 internal sealed interface IndexerEvent {
     data class UpdateRoots(val roots: Set<WatchedRoot>) : IndexerEvent
@@ -104,28 +106,64 @@ internal class FileIndexerImpl(
         val normalizedRoots = TreeSet(newRoots.map { File(it).canonicalPath })
         val normalizedIgnoredRoots = TreeSet(newIgnoredRoots.map { File(it).canonicalPath })
 
-        val watcherMap = TreeMap<String, MutableSet<String>>()
-
-        normalizedRoots.forEach {
+        normalizedRoots.forEach { // check no intersections
             if ((normalizedRoots.higher(it) ?: "").startsWith(it)) {
                 error("Cannot update roots because $it contains ${normalizedRoots.higher(it)!!}")
             }
-
-            watcherMap[it] = mutableSetOf()
         }
+
+        val (fileRootPaths, directoryRootPaths) = normalizedRoots.map { Paths.get(it) }.partition { it.isRegularFile() }
+        val fileRoots = fileRootPaths.map { it.toString() }
+        val fileParents = fileRootPaths.map { it.parent.toString() }
+        val directoryRoots = directoryRootPaths.map { it.toString() }
+
+        val minimalRoots = TreeSet<String>()
+        minimalRoots.addAll(directoryRootPaths.map { it.toString() })
+
+        for (root in (directoryRoots + fileParents)) {
+            if (root in minimalRoots) continue
+            val bigger = minimalRoots.lower(root)
+            if (bigger != null && root.startsWith(bigger)) continue
+
+            val smaller = minimalRoots.higher(root)
+            if (smaller != null && smaller.startsWith(root)) {
+                minimalRoots -= smaller
+            }
+            minimalRoots.add(root)
+        }
+
+        data class WatcherBuilder(
+            val ignoredRoots: MutableSet<String> = mutableSetOf(),
+            val actualRoots: MutableSet<String> = mutableSetOf(),
+        )
+
+        val watcherMap = TreeMap<String, WatcherBuilder>()
+        minimalRoots.forEach { watcherMap[it] = WatcherBuilder() }
 
         normalizedIgnoredRoots.forEach {
             if ((normalizedIgnoredRoots.higher(it) ?: "").startsWith(it)) {
                 error("Cannot update roots because ignore root $it contains ${normalizedIgnoredRoots.higher(it)!!}")
             }
 
-            val parent = watcherMap.lowerKey(it)
+            val parent = normalizedRoots.lower(it)
             if (parent == null || !it.startsWith(parent)) error("Ignored root $it is not part of any parent")
 
-            watcherMap[parent]!!.add(it)
+            watcherMap.lowerEntry(it)!!.value.ignoredRoots += it
         }
 
-        indexerEvents.send(IndexerEvent.UpdateRoots(watcherMap.entries.map { WatchedRoot(it.key, it.value) }.toSet()))
+        (directoryRoots + fileRoots).forEach {
+            watcherMap.floorEntry(it).value.actualRoots += it
+        }
+
+        indexerEvents.send(IndexerEvent.UpdateRoots(watcherMap.entries
+            .map {
+                WatchedRoot(
+                    root = it.key,
+                    ignoredRoots = it.value.ignoredRoots,
+                    actualRoots = it.value.actualRoots
+                )
+            }
+            .toSet()))
     }
 
     override suspend fun searchExact(term: String): Flow<SearchResultEntry<Int>> = flow {
