@@ -70,13 +70,7 @@ internal suspend fun segmentedIndexCoordinator(
 
         // region state
         val segments = TreeSet<SegmentState>(
-            // TODO
-            compareBy({
-                if (it.dataTermIds.isEmpty()) 0.0
-                else it.alivePostings.toDouble() / it.dataTermIds.size * it.termData.size
-            }, {
-                it.id
-            })
+            compareBy({ it.alivePostingsFraction() * it.memoryConsumption() }, { it.id })
         )
         var runningMergeSegments = 0
 

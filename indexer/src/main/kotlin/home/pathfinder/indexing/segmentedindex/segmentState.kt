@@ -32,6 +32,23 @@ data class SegmentState(
     }
 }
 
+fun SegmentState.memoryConsumption(): Long {
+    var result = 0L
+
+    result += termData.size
+    result += termOffsets.size
+    result += dataTermIds.size * 4
+    result += dataDocIds.size * 4
+    result += dataTermData.size * 4
+
+    return result
+}
+
+fun SegmentState.alivePostingsFraction(): Double {
+    if (alivePostings == 0) return 0.0
+    return alivePostings.toDouble() / dataTermIds.size
+}
+
 fun createSegment(document: String, documentData: List<Posting<Int>>): SegmentState {
 //    return SegmentState(segmentIdSequence.incrementAndGet(), arrayOf(), booleanArrayOf(), byteArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), 0)
 
