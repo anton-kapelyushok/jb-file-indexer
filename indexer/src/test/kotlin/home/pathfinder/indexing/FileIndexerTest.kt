@@ -4,10 +4,10 @@ import assertk.assertThat
 import assertk.assertions.containsExactlyInAnyOrder
 import assertk.assertions.isEmpty
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.nio.file.Paths
@@ -70,73 +70,74 @@ class FileIndexerTest {
                 )
 
                 // new files are detected
-                waitUntilUpdateRecognized(indexer) {
-                    mechFile.writeLines(sequence {
-                        yield("term2 term4 term6")
-                        yield("term3 term3 term12")
-                    })
+                mechFile.writeLines(sequence {
+                    yield("term2 term4 term6")
+                    yield("term3 term3 term12")
+                })
+
+                waitUntilAssertionSatisfied {
+                    assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
+                        SearchResultEntry("poupa.txt", "term3", 1),
+                        SearchResultEntry("poupa.txt", "term3", 2),
+                        SearchResultEntry("loupa.txt", "term3", 1),
+                        SearchResultEntry("volobuev.txt", "term3", 1),
+                        SearchResultEntry("mech.txt", "term3", 2),
+                        SearchResultEntry("mech.txt", "term3", 2),
+                    )
                 }
-                assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
-                    SearchResultEntry("poupa.txt", "term3", 1),
-                    SearchResultEntry("poupa.txt", "term3", 2),
-                    SearchResultEntry("loupa.txt", "term3", 1),
-                    SearchResultEntry("volobuev.txt", "term3", 1),
-                    SearchResultEntry("mech.txt", "term3", 2),
-                    SearchResultEntry("mech.txt", "term3", 2),
-                )
 
                 // file updates are detected
-                waitUntilUpdateRecognized(indexer) {
-                    mechFile.writeLines(sequence {
-                        yield("term3 term3 term12")
-                    })
-                }
-                assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
-                    SearchResultEntry("poupa.txt", "term3", 1),
-                    SearchResultEntry("poupa.txt", "term3", 2),
-                    SearchResultEntry("loupa.txt", "term3", 1),
-                    SearchResultEntry("volobuev.txt", "term3", 1),
-                    SearchResultEntry("mech.txt", "term3", 1),
-                    SearchResultEntry("mech.txt", "term3", 1),
-                )
-                // file deletes are detected
-                waitUntilIndexHasNDocuments(indexer, documentsCount = 3) {
-                    volobuevFile.deleteExisting()
-                }
-                println(indexer.state.value)
+                mechFile.writeLines(sequence {
+                    yield("term3 term3 term12")
+                })
 
-                assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
-                    SearchResultEntry("poupa.txt", "term3", 1),
-                    SearchResultEntry("poupa.txt", "term3", 2),
-                    SearchResultEntry("loupa.txt", "term3", 1),
-                    SearchResultEntry("mech.txt", "term3", 1),
-                    SearchResultEntry("mech.txt", "term3", 1),
-                )
+                waitUntilAssertionSatisfied {
+                    assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
+                        SearchResultEntry("poupa.txt", "term3", 1),
+                        SearchResultEntry("poupa.txt", "term3", 2),
+                        SearchResultEntry("loupa.txt", "term3", 1),
+                        SearchResultEntry("volobuev.txt", "term3", 1),
+                        SearchResultEntry("mech.txt", "term3", 1),
+                        SearchResultEntry("mech.txt", "term3", 1),
+                    )
+                }
+                // file deletes are detected
+                volobuevFile.deleteExisting()
+
+                waitUntilAssertionSatisfied {
+                    assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
+                        SearchResultEntry("poupa.txt", "term3", 1),
+                        SearchResultEntry("poupa.txt", "term3", 2),
+                        SearchResultEntry("loupa.txt", "term3", 1),
+                        SearchResultEntry("mech.txt", "term3", 1),
+                        SearchResultEntry("mech.txt", "term3", 1),
+                    )
+                }
 
                 // root deletes are handled
-                waitUntilIndexHasNDocuments(indexer, documentsCount = 2) {
-                    mechFile.deleteExisting()
-                    secondRoot.deleteExisting()
+                mechFile.deleteExisting()
+                secondRoot.deleteExisting()
+
+                waitUntilAssertionSatisfied {
+                    assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
+                        SearchResultEntry("poupa.txt", "term3", 1),
+                        SearchResultEntry("poupa.txt", "term3", 2),
+                        SearchResultEntry("loupa.txt", "term3", 1),
+                    )
                 }
 
-                assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
-                    SearchResultEntry("poupa.txt", "term3", 1),
-                    SearchResultEntry("poupa.txt", "term3", 2),
-                    SearchResultEntry("loupa.txt", "term3", 1),
-                )
-
-                waitUntilIndexState(indexer) { fileIndexerStatus ->
-                    fileIndexerStatus.watcherStates.any { (path, info) ->
+                waitUntilConditionSatisfied {
+                    indexer.state.value.watcherStates.any { (path, info) ->
                         info.status == RootWatcherStateInfo.Status.Failed
-                                && info.exception is RootWatcherState.RootDeletedException
+//                                && info.exception is RootWatcherState.RootDeletedException
                                 && File(path.root).canonicalPath == secondRoot.toFile().canonicalPath
                     }
                 }
 
                 // failures are removed from status info on root removal
                 indexer.updateContentRoots(setOf(firstRoot.toString()), setOf())
-                waitUntilIndexState(indexer) { fileIndexerStatus ->
-                    fileIndexerStatus.watcherStates.all { (_, info) ->
+                waitUntilConditionSatisfied {
+                    indexer.state.value.watcherStates.all { (_, info) ->
                         info.status != RootWatcherStateInfo.Status.Failed
                     }
                 }
@@ -160,34 +161,15 @@ class FileIndexerTest {
             .sortedWith(compareBy({ it.documentName }, { it.term }, { it.termData }))
     }
 
-    private suspend fun CoroutineScope.waitUntilUpdateRecognized(
-        fileIndexer: FileIndexer,
-        fn: suspend () -> Unit
-    ) {
-        val updateRecognized = launch {
-            fileIndexer.state.takeWhile { it.indexInfo.pendingUpdates == 0 && it.indexInfo.runningUpdates == 0 }
-                .collect()
+    private suspend fun waitUntilAssertionSatisfied(timeoutMillis: Long = 1000, assertion: suspend () -> Unit) {
+        withTimeout(timeoutMillis) {
+            while (!kotlin.runCatching { assertion() }.isSuccess) delay(100)
         }
-        fn()
-        updateRecognized.join()
     }
 
-    private suspend fun CoroutineScope.waitUntilIndexHasNDocuments(
-        fileIndexer: FileIndexer,
-        documentsCount: Int,
-        fn: suspend () -> Unit
-    ) {
-        val updateRecognized = launch {
-            fileIndexer.state.takeWhile { it.indexInfo.indexedDocuments != documentsCount }.collect()
+    private suspend fun waitUntilConditionSatisfied(timeoutMillis: Long = 1000, condition: suspend () -> Boolean) {
+        withTimeout(timeoutMillis) {
+            while (!condition()) delay(100)
         }
-        fn()
-        updateRecognized.join()
-    }
-
-    private suspend fun CoroutineScope.waitUntilIndexState(
-        fileIndexer: FileIndexer,
-        fn: (statusInfo: FileIndexerStatusInfo) -> Boolean
-    ) {
-        fileIndexer.state.takeWhile { !fn(it) }
     }
 }

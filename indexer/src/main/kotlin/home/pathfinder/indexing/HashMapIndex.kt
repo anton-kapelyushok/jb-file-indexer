@@ -127,6 +127,7 @@ internal class IndexOrchestrator<TermData : Any>(
     private val updateFailuresState = mutableMapOf<DocumentName, Throwable>()
 
     private var searchLocked = false
+    private var ackedUpdates = 0L
 
     val state = MutableStateFlow(IndexStatusInfo.empty())
 
@@ -178,6 +179,7 @@ internal class IndexOrchestrator<TermData : Any>(
     }
 
     private suspend fun handleUpdateRequest(msg: UpdateDocumentMessage<TermData>) {
+        ackedUpdates++
         updateFailuresState -= msg.documentName
 
         runningUpdates[msg.documentName]?.send(Unit) // cancel running
@@ -276,6 +278,7 @@ internal class IndexOrchestrator<TermData : Any>(
 
     private fun publishState() {
         state.value = IndexStatusInfo(
+            ackedUpdates = ackedUpdates,
             searchLocked = searchLocked,
             runningUpdates = runningUpdates.size,
             pendingUpdates = scheduledUpdates.size,

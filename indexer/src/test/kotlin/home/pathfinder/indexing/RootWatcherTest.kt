@@ -3,7 +3,10 @@ package home.pathfinder.indexing
 import assertk.assertThat
 import assertk.assertions.*
 import home.pathfinder.indexing.RootWatcherEvent.*
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import org.junit.jupiter.api.Test
 import java.io.File

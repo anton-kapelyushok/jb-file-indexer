@@ -69,6 +69,8 @@ internal suspend fun segmentedIndexCoordinator(
         // endregion
 
         // region state
+        var ackedUpdates = 0L
+
         val segments = TreeSet<SegmentState>(
             compareBy({ it.alivePostingsFraction() * it.memoryConsumption() }, { it.id })
         )
@@ -87,7 +89,6 @@ internal suspend fun segmentedIndexCoordinator(
 
         // region worker
         while (true) {
-            debugLog("before receive")
             select<Unit> {
                 searchLockInput.onReceive { v ->
                     debugLog("searchLockInput.onReceive $v")
@@ -96,6 +97,8 @@ internal suspend fun segmentedIndexCoordinator(
 
                 documentUpdateInput.onReceive { msg ->
                     debugLog("documentUpdateInput.onReceive ${msg.documentName}")
+                    ackedUpdates++
+
                     val documentName = msg.documentName
                     val segment = indexedDocuments[documentName]?.segmentHolder?.segment
                     val shouldWaitForMerge = segment != null && segment !in segments
@@ -176,7 +179,6 @@ internal suspend fun segmentedIndexCoordinator(
 
                     if (msg.update is DocumentMessage.Update) {
                         val cancelToken = CompletableDeferred<Unit>()
-                        debugLog("before createSegmentFromFileInput.send")
                         createSegmentFromFileInput.send(
                             CreateSegmentFromFileInput(docName, msg.update.flow, cancelToken)
                         )
@@ -206,6 +208,7 @@ internal suspend fun segmentedIndexCoordinator(
             }
 
             state.value = IndexStatusInfo(
+                ackedUpdates = ackedUpdates,
                 searchLocked = expectingUpdates,
                 runningUpdates = indexingDocuments.size,
                 pendingUpdates = scheduledReadyDocuments.size + scheduledWaitingDocuments.size,

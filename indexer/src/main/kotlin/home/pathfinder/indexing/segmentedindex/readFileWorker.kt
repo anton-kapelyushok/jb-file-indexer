@@ -27,7 +27,9 @@ suspend fun createSegmentFromFileWorker(
     output: SendChannel<CreateSegmentFromFileResult>,
 ) = coroutineScope {
     for (msg in input) {
-        if (msg.cancelToken.isCompleted) continue
+        if (msg.cancelToken.isCompleted) {
+            output.send(CreateSegmentFromFileResult(msg.path, Result.failure(CancellationException())))
+        }
         val dataDeferred = async {
             runCatching { msg.data.toList() }
                 .map { createSegment(msg.path, it) }

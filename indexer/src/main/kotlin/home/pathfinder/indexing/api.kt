@@ -12,7 +12,6 @@ typealias DocumentName = String
 fun fileIndexer(
     index: Index<Int> = segmentedIndex(),
     tokenize: (String) -> Flow<Posting<Int>> = ::splitBySpace,
-
 ): FileIndexer = FileIndexerImpl(index, tokenize)
 
 fun hashMapIndex(): Index<Int> = HashMapIndex()
@@ -59,6 +58,7 @@ interface Actor {
 }
 
 data class IndexStatusInfo(
+    val ackedUpdates: Long,
     val searchLocked: Boolean,
     val runningUpdates: Int,
     val pendingUpdates: Int,
@@ -69,6 +69,7 @@ data class IndexStatusInfo(
 ) {
     companion object {
         fun empty() = IndexStatusInfo(
+            ackedUpdates = 0L,
             searchLocked = false,
             pendingUpdates = 0,
             runningUpdates = 0,

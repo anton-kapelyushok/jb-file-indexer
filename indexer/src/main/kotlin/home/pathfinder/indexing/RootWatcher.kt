@@ -62,30 +62,34 @@ internal class RootWatcher(
     }
 
     private fun CoroutineScope.launchStateHolder() = launch {
-        val files = mutableSetOf<String>()
-        for (event in internalEvents) {
-            when (event) {
-                is RootWatcherEvent.FileUpdated -> {
-                    files += event.path
-                    events.send(event)
-                }
-                is RootWatcherEvent.FileDeleted -> {
-                    files -= event.path
-                    events.send(event)
-                }
-                RootWatcherEvent.StoppedWatching -> {
-                    events.send(event)
-                    files.forEach {
-                        events.send(RootWatcherEvent.FileDeleted(it))
+        try {
+            val files = mutableSetOf<String>()
+            for (event in internalEvents) {
+                when (event) {
+                    is RootWatcherEvent.FileUpdated -> {
+                        files += event.path
+                        events.send(event)
                     }
-                    files.clear()
-                    events.send(RootWatcherEvent.Stopped)
-                    events.close()
-                }
-                else -> {
-                    events.send(event)
+                    is RootWatcherEvent.FileDeleted -> {
+                        files -= event.path
+                        events.send(event)
+                    }
+                    RootWatcherEvent.StoppedWatching -> {
+                        events.send(event)
+                        files.forEach {
+                            events.send(RootWatcherEvent.FileDeleted(it))
+                        }
+                        files.clear()
+                        events.send(RootWatcherEvent.Stopped)
+                        events.close()
+                    }
+                    else -> {
+                        events.send(event)
+                    }
                 }
             }
+        } finally {
+            internalEvents.close()
         }
     }
 
