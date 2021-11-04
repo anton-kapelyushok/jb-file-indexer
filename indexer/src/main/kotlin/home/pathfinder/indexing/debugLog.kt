@@ -2,4 +2,4 @@
 
 package home.pathfinder.indexing
 
-internal fun debugLog(v: Any?) = if (true) println(v) else Unit
+internal fun debugLog(v: Any?) = if (false) println(v) else Unit
