@@ -81,6 +81,7 @@ class FileIndexerTest {
                     SearchResultEntry("loupa.txt", "term3", 1),
                     SearchResultEntry("volobuev.txt", "term3", 1),
                     SearchResultEntry("mech.txt", "term3", 2),
+                    SearchResultEntry("mech.txt", "term3", 2),
                 )
 
                 // file updates are detected
@@ -95,21 +96,24 @@ class FileIndexerTest {
                     SearchResultEntry("loupa.txt", "term3", 1),
                     SearchResultEntry("volobuev.txt", "term3", 1),
                     SearchResultEntry("mech.txt", "term3", 1),
+                    SearchResultEntry("mech.txt", "term3", 1),
                 )
-
                 // file deletes are detected
-                waitUntilUpdateRecognized(indexer) {
+                waitUntilIndexHasNDocuments(indexer, documentsCount = 3) {
                     volobuevFile.deleteExisting()
                 }
+                println(indexer.state.value)
+
                 assertThat(indexer.searchExactOrdered("term3")).containsExactlyInAnyOrder(
                     SearchResultEntry("poupa.txt", "term3", 1),
                     SearchResultEntry("poupa.txt", "term3", 2),
                     SearchResultEntry("loupa.txt", "term3", 1),
                     SearchResultEntry("mech.txt", "term3", 1),
+                    SearchResultEntry("mech.txt", "term3", 1),
                 )
 
                 // root deletes are handled
-                waitUntilUpdateRecognized(indexer) {
+                waitUntilIndexHasNDocuments(indexer, documentsCount = 2) {
                     mechFile.deleteExisting()
                     secondRoot.deleteExisting()
                 }
@@ -155,15 +159,26 @@ class FileIndexerTest {
             .sortedWith(compareBy({ it.documentName }, { it.term }, { it.termData }))
     }
 
-    private suspend fun waitUntilIndexRecognizesUpdate(fileIndexer: FileIndexer) {
-        fileIndexer.state.takeWhile { it.indexInfo.pendingUpdates == 0 && it.indexInfo.runningUpdates == 0 }.collect()
-    }
-
     private suspend fun CoroutineScope.waitUntilUpdateRecognized(
         fileIndexer: FileIndexer,
         fn: suspend () -> Unit
     ) {
-        val updateRecognized = launch { waitUntilIndexRecognizesUpdate(fileIndexer) }
+        val updateRecognized = launch {
+            fileIndexer.state.takeWhile { it.indexInfo.pendingUpdates == 0 && it.indexInfo.runningUpdates == 0 }
+                .collect()
+        }
+        fn()
+        updateRecognized.join()
+    }
+
+    private suspend fun CoroutineScope.waitUntilIndexHasNDocuments(
+        fileIndexer: FileIndexer,
+        documentsCount: Int,
+        fn: suspend () -> Unit
+    ) {
+        val updateRecognized = launch {
+            fileIndexer.state.takeWhile { it.indexInfo.indexedDocuments != documentsCount }.collect()
+        }
         fn()
         updateRecognized.join()
     }

@@ -28,7 +28,7 @@ internal class FileIndexerImpl(
     private val tokenize: (String) -> Flow<Posting<Int>>,
 ) : FileIndexer {
 
-//    private val index: HashMapIndex<Int> = HashMapIndex()
+    //    private val index: HashMapIndex<Int> = HashMapIndex()
     private val index: SegmentedIndex = SegmentedIndex()
 
     private val rootWatcherStates = mutableMapOf<WatchedRoot, RootWatcherState>()

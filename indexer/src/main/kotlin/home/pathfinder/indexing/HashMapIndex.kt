@@ -44,7 +44,7 @@ internal class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermD
 
 internal class IndexState<TermData : Any> {
     private val forwardIndex = mutableMapOf<DocumentName, MutableSet<Term>>()
-    private val invertedIndex = mutableMapOf<Term, MutableMap<DocumentName, MutableSet<TermData>>>()
+    private val invertedIndex = mutableMapOf<Term, MutableMap<DocumentName, MutableList<TermData>>>()
 
     suspend fun addTerms(documentName: DocumentName, terms: List<Posting<TermData>>) {
         terms.forEach { (term, termData) ->
@@ -52,7 +52,7 @@ internal class IndexState<TermData : Any> {
                 (forwardIndex[documentName] ?: mutableSetOf()).also { it.add(term) }
             invertedIndex[term] = (invertedIndex[term] ?: mutableMapOf()).also { termPostings ->
                 termPostings[documentName] =
-                    (termPostings[documentName] ?: mutableSetOf()).also { it.add(termData) }
+                    (termPostings[documentName] ?: mutableListOf()).also { it.add(termData) }
             }
         }
     }
@@ -242,9 +242,9 @@ internal class IndexOrchestrator<TermData : Any>(
                         stateUpdateMutex.withLock { indexState.addTerms(documentName, buffer.toList()) }
                         buffer.clear()
                     }
-
-                    stateUpdateMutex.withLock { indexState.addTerms(documentName, buffer) }
                 }
+
+                stateUpdateMutex.withLock { indexState.addTerms(documentName, buffer) }
             } catch (e: Throwable) {
                 stateUpdateMutex.withLock { indexState.removeDocument(documentName) }
                 throw e

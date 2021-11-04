@@ -100,8 +100,8 @@ internal suspend fun segmentedIndexCoordinator(
                     val segment = indexedDocuments[documentName]?.segmentHolder?.segment
                     val shouldWaitForMerge = segment != null && segment !in segments
 
+                    indexingDocuments[documentName]?.cancelToken?.complete(Unit)
 
-                    // TODO cancel indexing
                     if (shouldWaitForMerge) scheduledWaitingDocuments[documentName] = DocumentState.Scheduled(msg)
                     else scheduledReadyDocuments[documentName] = DocumentState.Scheduled(msg)
                 }
@@ -156,31 +156,33 @@ internal suspend fun segmentedIndexCoordinator(
             }
 
             run { // run updates
-                scheduledReadyDocuments.entries
-                    // TODO filter out indexing
+
+                val pickedUpdates = scheduledReadyDocuments.asSequence()
+                    .filter { (documentName) -> documentName !in indexingDocuments }
                     .take(createSegmentFromFileConcurrency - indexingDocuments.size)
-                    .forEach { (docName, msg) ->
-                        scheduledReadyDocuments.remove(docName)
 
-                        val segmentHolder = indexedDocuments[docName]?.segmentHolder
-                        if (segmentHolder != null) {
-                            indexedDocuments.remove(docName)
-                            segments -= segmentHolder.segment
-                            val newSegment = segmentHolder.segment.deleteDocument(docName)
-                            segments += newSegment
+                pickedUpdates.forEach { (docName, msg) ->
+                    scheduledReadyDocuments.remove(docName)
 
-                            segmentHolder.segment = newSegment
-                        }
+                    val segmentHolder = indexedDocuments[docName]?.segmentHolder
+                    if (segmentHolder != null) {
+                        indexedDocuments.remove(docName)
+                        segments -= segmentHolder.segment
+                        val newSegment = segmentHolder.segment.deleteDocument(docName)
+                        segments += newSegment
 
-                        if (msg.update is DocumentMessage.Update) {
-                            val cancelToken = CompletableDeferred<Unit>()
-                            debugLog("before createSegmentFromFileInput.send")
-                            createSegmentFromFileInput.send(
-                                CreateSegmentFromFileInput(docName, msg.update.flow, cancelToken)
-                            )
-                            indexingDocuments[docName] = DocumentState.Running(cancelToken)
-                        }
+                        segmentHolder.segment = newSegment
                     }
+
+                    if (msg.update is DocumentMessage.Update) {
+                        val cancelToken = CompletableDeferred<Unit>()
+                        debugLog("before createSegmentFromFileInput.send")
+                        createSegmentFromFileInput.send(
+                            CreateSegmentFromFileInput(docName, msg.update.flow, cancelToken)
+                        )
+                        indexingDocuments[docName] = DocumentState.Running(cancelToken)
+                    }
+                }
             }
 
             run { // run merges

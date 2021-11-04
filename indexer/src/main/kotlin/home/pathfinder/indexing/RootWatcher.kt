@@ -120,8 +120,6 @@ internal class RootWatcher(
                     val job = launch(Dispatchers.IO) {
                         try {
                             runInterruptible {
-                                // TODO
-                                println("WATCH!")
                                 watcher.watch()
                             }
                         } catch (e: ClosedWatchServiceException) {
@@ -177,6 +175,7 @@ internal class RootWatcher(
             }
             .listener(object : DirectoryChangeListener {
                 override fun onEvent(event: DirectoryChangeEvent) {
+                    debugLog("listener event: $event")
                     runBlocking {
                         val path = event.path().canonicalPath
                         if (isIgnored(event.path())) return@runBlocking
