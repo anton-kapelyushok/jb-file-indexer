@@ -16,6 +16,7 @@ import kotlin.io.path.createFile
 import kotlin.io.path.deleteExisting
 import kotlin.io.path.writeLines
 
+@Suppress("BlockingMethodInNonBlockingContext")
 class FileIndexerTest {
 
     @Test

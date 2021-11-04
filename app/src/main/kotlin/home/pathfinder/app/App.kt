@@ -11,9 +11,15 @@ import kotlin.system.measureTimeMillis
 fun main() {
     runBlocking {
 
-//        val fileIndexer = fileIndexer { path ->
-//            flow { emit(Posting(path.split("/").last(), 0)) }
-//        }
+        /* val fileIndexer = fileIndexer(
+            index = segmentedIndex(
+                createSegmentFromFileConcurrency = 4,
+                mergeSegmentsConcurrency = 2,
+                targetSegmentsCount = 2
+            ),
+            tokenize = { path ->
+                flow { emit(Posting(path.split("/").last(), 0)) }
+            }) */
 
         val fileIndexer = fileIndexer()
 

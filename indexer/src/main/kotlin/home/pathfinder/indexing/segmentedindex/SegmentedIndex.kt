@@ -8,8 +8,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-// WIP
-internal class SegmentedIndex : Index<Int>, SearchExact<Int> {
+internal class SegmentedIndex(
+    createSegmentFromFileConcurrency: Int,
+    mergeSegmentsConcurrency: Int,
+    targetSegmentsCount: Int,
+) : Index<Int> {
     private val searchLockInput = Channel<Boolean>()
     private val documentUpdateInput = Channel<DocumentMessage>()
     private val searchInput = Channel<SearchExactMessage<Int>>()

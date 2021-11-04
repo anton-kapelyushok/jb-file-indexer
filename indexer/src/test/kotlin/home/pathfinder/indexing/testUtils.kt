@@ -8,11 +8,11 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 
-fun <T> fileSystemTest(timeout: Int = 10000, fn: suspend CoroutineScope.(dir: Path) -> T): T {
+fun <T> fileSystemTest(timeoutMillis: Long = 10_000, fn: suspend CoroutineScope.(dir: Path) -> T): T {
     val dir = Files.createTempDirectory("poupa")
     return try {
         runBlocking(Dispatchers.IO) {
-            withTimeout(10000) {
+            withTimeout(timeoutMillis) {
                 fn(dir)
             }
         }

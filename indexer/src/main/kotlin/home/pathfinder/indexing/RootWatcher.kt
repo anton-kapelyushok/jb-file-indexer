@@ -41,7 +41,6 @@ data class WatchedRoot(val root: String, val ignoredRoots: Set<String>)
 
 internal class RootWatcher(
     watchedRoot: WatchedRoot,
-    private val cancel: CompletableDeferred<Unit>,
 ) : Actor {
 
     val events = Channel<RootWatcherEvent>()
@@ -51,6 +50,9 @@ internal class RootWatcher(
     private val internalEvents = Channel<RootWatcherEvent>()
 
     private val initializing = AtomicBoolean(true)
+    private val cancel = CompletableDeferred<Unit>()
+
+    fun cancel() = cancel.complete(Unit)
 
     override suspend fun go(
         scope: CoroutineScope

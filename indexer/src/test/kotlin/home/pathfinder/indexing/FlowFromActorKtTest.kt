@@ -20,7 +20,6 @@ internal class FlowFromActorKtTest {
         override val dataChannel: SendChannel<Int>
     ) : FlowFromActorMessage<Int>
 
-
     @Test
     fun `should return flow from actor`() {
         runBlocking {

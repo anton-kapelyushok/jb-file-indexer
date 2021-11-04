@@ -1,14 +1,13 @@
 package home.pathfinder.indexing
 
 import home.pathfinder.indexing.RootWatcherEvent.RootWatcherLifeCycleEvent
-import kotlinx.coroutines.CompletableDeferred
 
 internal sealed interface RootWatcherState {
 
     class UnexpectedWatcherStopException : RuntimeException()
     class RootDeletedException : RuntimeException()
 
-    data class Initializing(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable {
+    data class Initializing(override val cancel: () -> Unit) : RootWatcherState, Cancelable {
         override val terminating: Boolean = false
         override val inConsistentState: Boolean = false
 
@@ -25,7 +24,7 @@ internal sealed interface RootWatcherState {
         override fun asStatus() = RootWatcherStateInfo(RootWatcherStateInfo.Status.Initializing)
 
         override fun onTerminate(): RootWatcherState {
-            cancel.complete(Unit)
+            cancel()
             return Canceling
         }
 
@@ -34,7 +33,7 @@ internal sealed interface RootWatcherState {
         }
     }
 
-    data class Running(override val cancel: CompletableDeferred<Unit>) : RootWatcherState, Cancelable {
+    data class Running(override val cancel: () -> Unit) : RootWatcherState, Cancelable {
         override val terminating: Boolean = false
         override val inConsistentState = true
 
@@ -51,7 +50,7 @@ internal sealed interface RootWatcherState {
         override fun asStatus() = RootWatcherStateInfo(RootWatcherStateInfo.Status.Running)
 
         override fun onTerminate(): RootWatcherState {
-            cancel.complete(Unit)
+            cancel()
             return Canceling
         }
 
@@ -119,7 +118,7 @@ internal sealed interface RootWatcherState {
     }
 
     interface Cancelable {
-        val cancel: CompletableDeferred<Unit>
+        val cancel: () -> Unit
     }
 
     val terminating: Boolean

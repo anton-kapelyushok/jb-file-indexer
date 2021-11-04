@@ -15,7 +15,7 @@ import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-internal class HashMapIndex<TermData : Any> : Index<TermData>, SearchExact<TermData> {
+internal class HashMapIndex<TermData : Any> : Index<TermData> {
 
     private val indexState = IndexState<TermData>()
     private val indexOrchestrator = IndexOrchestrator(

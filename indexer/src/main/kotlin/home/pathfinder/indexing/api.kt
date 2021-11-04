@@ -1,5 +1,6 @@
 package home.pathfinder.indexing
 
+import home.pathfinder.indexing.segmentedindex.SegmentedIndex
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -8,7 +9,22 @@ import kotlinx.coroutines.flow.StateFlow
 typealias Term = String
 typealias DocumentName = String
 
-fun fileIndexer(tokenize: (String) -> Flow<Posting<Int>> = ::splitBySpace): FileIndexer = FileIndexerImpl(tokenize)
+fun fileIndexer(
+    index: Index<Int> = segmentedIndex(),
+    tokenize: (String) -> Flow<Posting<Int>> = ::splitBySpace,
+
+): FileIndexer = FileIndexerImpl(index, tokenize)
+
+fun hashMapIndex(): Index<Int> = HashMapIndex()
+fun segmentedIndex(
+    createSegmentFromFileConcurrency: Int = 16,
+    mergeSegmentsConcurrency: Int = 4,
+    targetSegmentsCount: Int = 32,
+): Index<Int> = SegmentedIndex(
+    createSegmentFromFileConcurrency,
+    mergeSegmentsConcurrency,
+    targetSegmentsCount,
+)
 
 interface FileIndexer : Actor {
     override suspend fun go(scope: CoroutineScope): Job
@@ -33,6 +49,7 @@ interface Index<TermData : Any> : Actor {
     suspend fun updateDocument(name: DocumentName, terms: Flow<Posting<TermData>>)
     suspend fun removeDocument(name: DocumentName)
     suspend fun setSearchLockStatus(status: Boolean)
+    suspend fun searchExact(term: DocumentName): Flow<SearchResultEntry<TermData>>
 
     val state: StateFlow<IndexStatusInfo>
 }
@@ -61,10 +78,6 @@ data class IndexStatusInfo(
             segmentMergesInProgress = 0,
         )
     }
-}
-
-interface SearchExact<TermData : Any> {
-    suspend fun searchExact(term: DocumentName): Flow<SearchResultEntry<TermData>>
 }
 
 data class SearchResultEntry<TermData : Any>(

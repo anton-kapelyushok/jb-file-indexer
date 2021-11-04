@@ -7,7 +7,6 @@ import assertk.assertions.isNull
 import home.pathfinder.indexing.RootWatcherEvent.*
 import home.pathfinder.indexing.RootWatcherEvent.Failed
 import home.pathfinder.indexing.RootWatcherState.*
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 
@@ -15,14 +14,14 @@ class RootWatcherStateTest {
     @Test
     fun `happy path`() {
         runBlocking {
-            var (state, cancel) = initialState()
+            var (state, isCanceled) = initialState()
 
             state = state!!.onWatcherEvent(Initialized)
             assertThat(state).isNotNull().isInstanceOf(Running::class)
 
             state = state!!.onTerminate()
             assertThat(state).isNotNull().isInstanceOf(Canceling::class)
-            assertThat(cancel.isCompleted)
+            assertThat(isCanceled())
 
             state = state.onWatcherEvent(StoppedWatching)
             assertThat(state).isNotNull().isInstanceOf(Canceling::class)
@@ -34,7 +33,7 @@ class RootWatcherStateTest {
 
     @Test
     fun `failed on start`() {
-        var (state, cancel) = initialState()
+        var (state) = initialState()
 
         state = state!!.onWatcherEvent(Initialized)
         assertThat(state).isNotNull().isInstanceOf(Running::class)
@@ -51,7 +50,7 @@ class RootWatcherStateTest {
 
     @Test
     fun `failed in process`() {
-        var (state, cancel) = initialState()
+        var (state) = initialState()
 
         state = state!!.onWatcherEvent(Failed(RuntimeException()))
         assertThat(state).isNotNull().isInstanceOf(Failing::class)
@@ -65,7 +64,7 @@ class RootWatcherStateTest {
 
     @Test
     fun `root removed`() {
-        var (state, cancel) = initialState()
+        var (state) = initialState()
 
         state = state!!.onWatcherEvent(Initialized)
         assertThat(state).isNotNull().isInstanceOf(Running::class)
@@ -83,7 +82,7 @@ class RootWatcherStateTest {
 
     @Test
     fun `overflown`() {
-        var (state, cancel) = initialState()
+        var (state) = initialState()
 
         state = state!!.onWatcherEvent(Initialized)
         assertThat(state).isNotNull().isInstanceOf(Running::class)
@@ -103,7 +102,7 @@ class RootWatcherStateTest {
 
     @Test
     fun `unexpected watcher stop`() {
-        var (state, cancel) = initialState()
+        var (state) = initialState()
 
         state = state!!.onWatcherEvent(Initialized)
         assertThat(state).isNotNull().isInstanceOf(Running::class)
@@ -119,7 +118,7 @@ class RootWatcherStateTest {
 
     @Test
     fun `failed but has ceased to interest while in failing state`() {
-        var (state, cancel) = initialState()
+        var (state) = initialState()
 
         state = state!!.onWatcherEvent(Initialized)
         assertThat(state).isNotNull().isInstanceOf(Running::class)
@@ -137,8 +136,8 @@ class RootWatcherStateTest {
         assertThat(state).isNull()
     }
 
-    private fun initialState(): Pair<RootWatcherState?, CompletableDeferred<Unit>> {
-        val cancel = CompletableDeferred<Unit>()
-        return Initializing(cancel) to cancel
+    private fun initialState(): Pair<RootWatcherState?, () -> Boolean> {
+        var canceled = false
+        return Initializing { canceled = true } to { canceled }
     }
 }

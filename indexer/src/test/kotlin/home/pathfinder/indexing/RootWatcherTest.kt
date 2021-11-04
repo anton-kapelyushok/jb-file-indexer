@@ -22,7 +22,7 @@ class RootWatcherTest {
             file.createFile()
             delay(200) // let it flush
 
-            runRootWatcher(file.toString()) { result, cancel ->
+            runRootWatcher(file.toString()) { result, cancelRootWatcher ->
                 val startedEvents = result.getEvents(2)
                 assertThat(startedEvents.size).isEqualTo(2)
                 assertThat(startedEvents[0]).isInstanceOf(FileUpdated::class)
@@ -38,7 +38,7 @@ class RootWatcherTest {
                 val updatedEvents2 = result.getEvents(1)
                 assertThat(updatedEvents2[0]).isInstanceOf(FileUpdated::class)
                 assertThat((updatedEvents2[0] as FileUpdated).path).endsWith("poupa.txt")
-                cancel.complete(Unit)
+                cancelRootWatcher()
 
                 val teardownEvents = result.getEvents(Int.MAX_VALUE)
 
@@ -84,7 +84,7 @@ class RootWatcherTest {
             val loupaFile = Paths.get(rootDir.toString(), "loupa.txt").also { it.createFile() }
             delay(200) // let it flush
 
-            runRootWatcher(rootDir.toString()) { result, cancel ->
+            runRootWatcher(rootDir.toString()) { result, cancelRootWatcher ->
                 val startedEvents = result.getEvents(3)
 
                 assertThat(startedEvents.size).isEqualTo(3)
@@ -107,7 +107,7 @@ class RootWatcherTest {
                 assertThat(loupaFileUpdates[0]).isInstanceOf(FileDeleted::class)
                 assertThat((loupaFileUpdates[0] as FileDeleted).path).endsWith("loupa.txt")
 
-                cancel.complete(Unit)
+                cancelRootWatcher()
 
                 val teardownEvents = result.getEvents(Int.MAX_VALUE)
 
@@ -145,16 +145,15 @@ class RootWatcherTest {
 
     private suspend fun <T> CoroutineScope.runRootWatcher(
         path: String,
-        fn: suspend (result: RootWatcherResult, cancel: CompletableDeferred<Unit>) -> T
+        fn: suspend (result: RootWatcherResult, cancel: () -> Unit) -> T
     ): T {
-        val cancel = CompletableDeferred<Unit>()
-        val rw = RootWatcher(WatchedRoot(path, setOf()), cancel)
+        val rw = RootWatcher(WatchedRoot(path, setOf()))
         val job = launch { rw.go(this) }
 
         return try {
-            fn(RootWatcherResult(rw, job), cancel)
+            fn(RootWatcherResult(rw, job)) { rw.cancel() }
         } finally {
-            cancel.complete(Unit)
+            rw.cancel()
             job.cancel()
         }
     }

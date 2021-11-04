@@ -2,7 +2,6 @@ package home.pathfinder.indexing
 
 import home.pathfinder.indexing.IndexerEvent.WatcherEvent
 import home.pathfinder.indexing.RootWatcherEvent.RootWatcherLifeCycleEvent
-import home.pathfinder.indexing.segmentedindex.SegmentedIndex
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -25,11 +24,9 @@ internal sealed interface IndexerEvent {
 }
 
 internal class FileIndexerImpl(
+    private val index: Index<Int>,
     private val tokenize: (String) -> Flow<Posting<Int>>,
 ) : FileIndexer {
-
-    //    private val index: HashMapIndex<Int> = HashMapIndex()
-    private val index: SegmentedIndex = SegmentedIndex()
 
     private val rootWatcherStates = mutableMapOf<WatchedRoot, RootWatcherState>()
     private var watchedRoots = setOf<WatchedRoot>()
@@ -157,14 +154,9 @@ internal class FileIndexerImpl(
     private suspend fun launchWatcher(scope: CoroutineScope, path: WatchedRoot) {
         assert(rootWatcherStates[path] == null)
 
-        val cancel = CompletableDeferred<Unit>()
+        val watcher = RootWatcher(path)
 
-        val watcher = RootWatcher(
-            watchedRoot = path,
-            cancel = cancel
-        )
-
-        rootWatcherStates[path] = RootWatcherState.Initializing(cancel)
+        rootWatcherStates[path] = RootWatcherState.Initializing { watcher.cancel() }
 
         scope.launch {
             watcher.go(this)
