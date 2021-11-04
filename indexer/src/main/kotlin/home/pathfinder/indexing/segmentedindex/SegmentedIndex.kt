@@ -9,9 +9,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 internal class SegmentedIndex(
-    createSegmentFromFileConcurrency: Int,
-    mergeSegmentsConcurrency: Int,
-    targetSegmentsCount: Int,
+    private val createSegmentFromFileConcurrency: Int,
+    private val mergeSegmentsConcurrency: Int,
+    private val targetSegmentsCount: Int,
 ) : Index<Int> {
     private val searchLockInput = Channel<Boolean>()
     private val documentUpdateInput = Channel<DocumentMessage>()
@@ -33,7 +33,17 @@ internal class SegmentedIndex(
         flowFromActor(searchInput) { cancel, data -> SearchExactMessage(term, data, cancel) }
 
     override suspend fun go(scope: CoroutineScope) =
-        scope.launch { segmentedIndexCoordinator(_state, searchLockInput, documentUpdateInput, searchInput) }
+        scope.launch {
+            segmentedIndexCoordinator(
+                state = _state,
+                searchLockInput = searchLockInput,
+                documentUpdateInput = documentUpdateInput,
+                searchInput = searchInput,
+                createSegmentFromFileConcurrency = createSegmentFromFileConcurrency,
+                mergeSegmentsConcurrency = mergeSegmentsConcurrency,
+                targetSegmentsCount = targetSegmentsCount
+            )
+        }
 
     private val _state = MutableStateFlow(IndexStatusInfo.empty())
     override val state: StateFlow<IndexStatusInfo> get() = _state
