@@ -74,6 +74,7 @@ internal suspend fun segmentedIndexCoordinator(
         val segments = TreeSet<SegmentState>(
             compareBy({ it.alivePostingsFraction() * it.memoryConsumption() }, { it.id })
         )
+        val mergingSegments = mutableSetOf<SegmentState>()
         var runningMergeSegments = 0
 
         val indexedDocuments = mutableMapOf<String, DocumentState.Indexed>()
@@ -132,6 +133,7 @@ internal suspend fun segmentedIndexCoordinator(
                     debugLog("mergeSegmentsResult.onReceive ${msg.originalSegments.size}")
                     runningMergeSegments -= 1
                     segments += msg.resultSegment
+                    mergingSegments -= msg.originalSegments
 
                     val segmentHolder = SegmentHolder(msg.resultSegment)
 
@@ -148,18 +150,16 @@ internal suspend fun segmentedIndexCoordinator(
                         && indexingDocuments.isEmpty()
                         && scheduledReadyDocuments.isEmpty()
                         && scheduledWaitingDocuments.isEmpty()
-                        && runningMergeSegments == 0
 
                 if (indexIsOnline) {
                     searchInput.onReceive { msg ->
                         debugLog("searchInput.onReceive $msg")
-                        handleSearchRequest(msg, segments.toSet())
+                        handleSearchRequest(msg, segments + mergingSegments)
                     }
                 }
             }
 
             run { // run updates
-
                 val pickedUpdates = scheduledReadyDocuments.asSequence()
                     .filter { (documentName) -> documentName !in indexingDocuments }
                     .take(createSegmentFromFileConcurrency - indexingDocuments.size)
@@ -194,6 +194,7 @@ internal suspend fun segmentedIndexCoordinator(
                     runningMergeSegments++
                     val segmentsToMerge = segments.take(2)
                     segments -= segmentsToMerge
+                    mergingSegments += segmentsToMerge
                     debugLog("before mergeSegmentsInput.send")
                     mergeSegmentsInput.send(MergeSegmentsInput(segmentsToMerge))
                     segmentsToMerge.forEach { segment ->

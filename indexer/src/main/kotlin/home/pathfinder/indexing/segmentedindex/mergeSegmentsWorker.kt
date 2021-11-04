@@ -3,6 +3,7 @@ package home.pathfinder.indexing.segmentedindex
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 
 data class MergeSegmentsInput(
     val segmentsToMerge: Collection<SegmentState>
@@ -19,6 +20,7 @@ suspend fun mergeSegmentsWorker(
 ) = coroutineScope {
     for ((segmentsToMerge) in input) {
         val segments = segmentsToMerge.toSortedSet(compareBy({ it.alivePostings }, { it.id }))
+        delay(5000)
         while (segments.size > 1) {
             val (segment1, segment2) = segments.take(2)
             val newSegment = mergeSegments(segment1, segment2)
