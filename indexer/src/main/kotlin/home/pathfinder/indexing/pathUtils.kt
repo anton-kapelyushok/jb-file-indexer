@@ -37,12 +37,8 @@ internal class PathTree() : Iterable<String> {
     }
 
     fun pathOrItsParent(path: String): String? {
-        val pathString = path.asPathString()
-        val closestParent = treeSet.floor(pathString)
-        if (closestParent != null && pathString.startsWith(closestParent)) {
-            return closestParent.asString()
-        }
-        return null
+        if (path.asPathString() in treeSet) return path
+        return parentOf(path)
     }
 
     fun containsParentOf(path: String): Boolean {
@@ -50,10 +46,10 @@ internal class PathTree() : Iterable<String> {
     }
 
     fun parentOf(path: String): String? {
-        val pathString = path.asPathString()
-        val closestParent = treeSet.lower(pathString)
-        if (closestParent != null && pathString.startsWith(closestParent)) {
-            return closestParent.asString()
+        val parts = path.split(File.separator)
+        for (i in parts.size - 1 downTo 0) {
+            val parent = parts.subList(0, i).joinToString(File.separator)
+            if ((parent + File.separator) in treeSet) return parent
         }
         return null
     }
