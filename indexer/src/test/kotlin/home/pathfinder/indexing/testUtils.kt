@@ -1,9 +1,7 @@
 package home.pathfinder.indexing
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.toList
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -21,5 +19,26 @@ fun <T> fileSystemTest(timeoutMillis: Long = 10_000, fn: suspend CoroutineScope.
             .sorted(Comparator.reverseOrder())
             .map(Path::toFile)
             .forEach(File::delete)
+    }
+}
+
+suspend fun Index<Int>.searchExactOrdered(term: Term): List<SearchResultEntry<Int>> {
+    return this.searchExact(term).toList().sortedWith(compareBy({ it.documentName }, { it.term }, { it.termData }))
+}
+
+fun <T> runIndexTest(
+    index: Index<Int>,
+    timeoutMillis: Long = 1000L,
+    fn: suspend CoroutineScope.(index: Index<Int>) -> T
+): T {
+    return runBlocking {
+        withTimeout(timeoutMillis) {
+            val indexJob = launch { index.go(this) }
+            try {
+                fn(index)
+            } finally {
+                indexJob.cancel()
+            }
+        }
     }
 }

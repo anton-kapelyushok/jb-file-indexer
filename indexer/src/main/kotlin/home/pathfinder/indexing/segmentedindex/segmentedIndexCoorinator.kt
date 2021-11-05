@@ -163,6 +163,7 @@ internal suspend fun segmentedIndexCoordinator(
                 val pickedUpdates = scheduledReadyDocuments.asSequence()
                     .filter { (documentName) -> documentName !in indexingDocuments }
                     .take(createSegmentFromFileConcurrency - indexingDocuments.size)
+                    .toList()
 
                 pickedUpdates.forEach { (docName, msg) ->
                     scheduledReadyDocuments.remove(docName)
@@ -190,6 +191,7 @@ internal suspend fun segmentedIndexCoordinator(
             run { // run merges
                 while (runningMergeSegments < mergeSegmentsConcurrency
                     && segments.size > targetSegmentsCount
+                    && (segments.size > targetSegmentsCount * 2 || indexingDocuments.isEmpty())
                 ) {
                     runningMergeSegments++
                     val segmentsToMerge = segments.take(2)
@@ -221,10 +223,10 @@ internal suspend fun segmentedIndexCoordinator(
         }
         // endregion
     } finally {
-        createSegmentFromFileInput.close()
-        createSegmentFromFileOutput.close()
-        mergeSegmentsInput.close()
-        mergeSegmentsResult.close()
+        createSegmentFromFileInput.cancel()
+        createSegmentFromFileOutput.cancel()
+        mergeSegmentsInput.cancel()
+        mergeSegmentsResult.cancel()
     }
 }
 

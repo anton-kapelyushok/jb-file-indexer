@@ -87,7 +87,7 @@ internal class RootWatcher(
                 }
             }
         } finally {
-            internalEvents.close()
+            internalEvents.cancel()
         }
     }
 
