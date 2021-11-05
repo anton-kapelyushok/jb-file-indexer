@@ -129,7 +129,6 @@ class FileIndexerTest {
                 waitUntilConditionSatisfied {
                     indexer.state.value.watcherStates.any { (path, info) ->
                         info.status == RootWatcherStateInfo.Status.Failed
-//                                && info.exception is RootWatcherState.RootDeletedException
                                 && File(path.root).canonicalPath == secondRoot.toFile().canonicalPath
                     }
                 }

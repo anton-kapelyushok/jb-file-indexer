@@ -1,12 +1,7 @@
 package home.pathfinder.indexing
 
-import assertk.assertThat
-import assertk.assertions.*
 import home.pathfinder.indexing.RootWatcherEvent.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import kotlinx.coroutines.selects.select
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -23,33 +18,44 @@ class RootWatcherTest {
         fileSystemTest { workingDirectory ->
             val file = Paths.get(workingDirectory.toString(), "poupa.txt")
             file.createFile()
-            delay(200) // let it flush
 
-            runRootWatcher(file.toString()) { result, cancelRootWatcher ->
-                val startedEvents = result.getEvents(2)
-                assertThat(startedEvents.size).isEqualTo(2)
-                assertThat(startedEvents[0]).isInstanceOf(FileUpdated::class)
-                assertThat((startedEvents[0] as FileUpdated).path).endsWith("poupa.txt")
-                assertThat(startedEvents[1]).isInstanceOf(Initialized::class)
+
+            val otherFile = Paths.get(workingDirectory.toString(), "loupa.txt")
+            otherFile.createFile()
+
+            runRootWatcher(workingDirectory.toString(), file.toString()) { rwMatcher, cancelRootWatcher ->
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is FileUpdated && it.shortFileName() == "poupa.txt" }
+                )
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is Initialized }
+                )
 
                 file.writeLines(sequence { yield("1") })
-                val updatedEvents1 = result.getEvents(1)
-                assertThat(updatedEvents1[0]).isInstanceOf(FileUpdated::class)
-                assertThat((updatedEvents1[0] as FileUpdated).path).endsWith("poupa.txt")
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is FileUpdated && it.shortFileName() == "poupa.txt" }
+                )
 
                 file.writeLines(sequence { yield("2") })
-                val updatedEvents2 = result.getEvents(1)
-                assertThat(updatedEvents2[0]).isInstanceOf(FileUpdated::class)
-                assertThat((updatedEvents2[0] as FileUpdated).path).endsWith("poupa.txt")
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is FileUpdated && it.shortFileName() == "poupa.txt" }
+                )
+
+                otherFile.writeLines(sequence { yield("3") })
+                rwMatcher.verifyEventDoesNotHappenInPeriod(timeoutMillis = 500,
+                    eventCondition { it is FileUpdated && it.shortFileName() == "loupa.txt" }
+                )
+
                 cancelRootWatcher()
-
-                val teardownEvents = result.getEvents(Int.MAX_VALUE)
-
-                assertThat(teardownEvents.map { it.javaClass }).hasSize(3)
-
-                assertThat(teardownEvents[0]).isInstanceOf(StoppedWatching::class)
-                assertThat(teardownEvents[1]).isInstanceOf(FileDeleted::class)
-                assertThat(teardownEvents[2]).isInstanceOf(Stopped::class)
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is StoppedWatching }
+                )
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is FileDeleted && it.shortFileName() == "poupa.txt" }
+                )
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is Stopped }
+                )
             }
         }
     }
@@ -59,20 +65,21 @@ class RootWatcherTest {
         fileSystemTest { workingDirectory ->
             val file = Paths.get(workingDirectory.toString(), "poupa.txt")
             file.createFile()
-            delay(200) // let it flush
 
-            runRootWatcher(file.toString()) { result, cancel ->
-                result.getEvents(2)
+            runRootWatcher(workingDirectory.toString(), file.toString()) { rwMatcher, cancel ->
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is Initialized }
+                )
+
                 file.deleteExisting()
 
-                val teardownEvents = result.getEvents(Int.MAX_VALUE)
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is FileDeleted && it.shortFileName() == "poupa.txt" }
+                )
 
-                assertThat(teardownEvents.map { it.javaClass }).hasSize(4)
-
-                assertThat(teardownEvents[0]).isInstanceOf(FileDeleted::class)
-                assertThat(teardownEvents[1]).isInstanceOf(RootDeleted::class)
-                assertThat(teardownEvents[2]).isInstanceOf(StoppedWatching::class)
-                assertThat(teardownEvents[3]).isInstanceOf(Stopped::class)
+                rwMatcher.verifyEventDoesNotHappenInPeriod(timeoutMillis = 500,
+                    eventCondition { it is StoppedWatching }
+                )
             }
         }
     }
@@ -85,40 +92,38 @@ class RootWatcherTest {
 
             val poupaFile = Paths.get(rootDir.toString(), "poupa.txt").also { it.createFile() }
             val loupaFile = Paths.get(rootDir.toString(), "loupa.txt").also { it.createFile() }
-            delay(200) // let it flush
 
-            runRootWatcher(rootDir.toString()) { result, cancelRootWatcher ->
-                val startedEvents = result.getEvents(3)
+            runRootWatcher(rootDir.toString()) { rwMatcher, cancelRootWatcher ->
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is FileUpdated && it.shortFileName() == "poupa.txt" },
+                    eventCondition { it is FileUpdated && it.shortFileName() == "loupa.txt" },
+                )
 
-                assertThat(startedEvents.size).isEqualTo(3)
-
-                val fileUpdateEvents = startedEvents.subList(0, 2)
-                assertThat(fileUpdateEvents).each { it.isInstanceOf(FileUpdated::class) }
-                assertThat(fileUpdateEvents.map { it as FileUpdated }.map { it.path.split(File.separator).last() })
-                    .containsAll("poupa.txt", "loupa.txt")
-
-                assertThat(startedEvents[2]).isInstanceOf(Initialized::class)
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is Initialized }
+                )
 
                 poupaFile.writeLines(sequence { yield("1") })
-                val poupaUpdateEvents = result.getEvents(1)
-
-                assertThat(poupaUpdateEvents[0]).isInstanceOf(FileUpdated::class)
-                assertThat((poupaUpdateEvents[0] as FileUpdated).path).endsWith("poupa.txt")
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is FileUpdated && it.shortFileName() == "poupa.txt" }
+                )
 
                 loupaFile.deleteExisting()
-                val loupaFileUpdates = result.getEvents(1)
-                assertThat(loupaFileUpdates[0]).isInstanceOf(FileDeleted::class)
-                assertThat((loupaFileUpdates[0] as FileDeleted).path).endsWith("loupa.txt")
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is FileDeleted && it.shortFileName() == "loupa.txt" }
+                )
 
                 cancelRootWatcher()
 
-                val teardownEvents = result.getEvents(Int.MAX_VALUE)
-
-                assertThat(teardownEvents.map { it.javaClass }).hasSize(3)
-
-                assertThat(teardownEvents[0]).isInstanceOf(StoppedWatching::class)
-                assertThat(teardownEvents[1]).isInstanceOf(FileDeleted::class)
-                assertThat(teardownEvents[2]).isInstanceOf(Stopped::class)
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is StoppedWatching }
+                )
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is FileDeleted && it.shortFileName() == "poupa.txt" }
+                )
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is Stopped }
+                )
             }
         }
     }
@@ -129,28 +134,28 @@ class RootWatcherTest {
             val rootDir = Paths.get(workingDirectory.toString(), "poupa")
             rootDir.createDirectory()
 
-            runRootWatcher(rootDir.toString()) { result, cancel ->
+            runRootWatcher(rootDir.toString()) { rwMatcher, _ ->
 
-                result.getEvents(1)
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is Initialized }
+                )
 
                 rootDir.deleteExisting()
-
-                val teardownEvents = result.getEvents(Int.MAX_VALUE)
-
-                assertThat(teardownEvents.map { it.javaClass }).hasSize(3)
-
-                assertThat(teardownEvents[0]).isInstanceOf(RootDeleted::class)
-                assertThat(teardownEvents[1]).isInstanceOf(StoppedWatching::class)
-                assertThat(teardownEvents[2]).isInstanceOf(Stopped::class)
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is StoppedWatching }
+                )
+                rwMatcher.waitUntilEvent(
+                    eventCondition { it is Stopped }
+                )
             }
         }
     }
 
     private suspend fun <T> CoroutineScope.runRootWatcher(
-        path: String,
+        path: String, actualPath: String = path,
         fn: suspend (result: RootWatcherResult, cancel: () -> Unit) -> T
     ): T {
-        val rw = RootWatcher(WatchedRoot(path, setOf(), setOf(path)))
+        val rw = RootWatcher(WatchedRoot(path, setOf(), setOf(actualPath)))
         val job = launch { rw.go(this) }
 
         return try {
@@ -161,41 +166,97 @@ class RootWatcherTest {
         }
     }
 
-    internal class RootWatcherResult(
+    private fun RootWatcherFileEvent.shortFileName(): String = path.split(File.separator).last()
+
+    private var conditionId = 0
+
+    private data class EventCondition(
+        val description: String,
+        val predicate: (event: RootWatcherEvent) -> Boolean,
+    ) {
+        override fun toString(): String {
+            return "Event condition: $description"
+        }
+    }
+
+    private fun eventCondition(description: String? = null, predicate: (event: RootWatcherEvent) -> Boolean) =
+        EventCondition(
+            description = description ?: "${++conditionId}",
+            predicate = predicate
+        )
+
+    private class RootWatcherResult(
         private val watcher: RootWatcher,
         private val job: Job,
     ) {
 
-        var running = true
+        private var running = true
 
-        suspend fun getEvents(numberOfEvents: Int): List<RootWatcherEvent> {
-            val events = mutableListOf<RootWatcherEvent>()
-
-            fun add(event: RootWatcherEvent) {
-                println("$event")
-                events.add(event)
-            }
-
-            while (running && events.size < numberOfEvents) {
-                select<Unit> {
-                    watcher.events.onReceive { event ->
-                        when (event) {
-                            is Stopped -> {
+        suspend fun verifyEventDoesNotHappenInPeriod(timeoutMillis: Long, condition: EventCondition) {
+            if (!running) return
+            coroutineScope {
+                val delayJob = launch { delay(timeoutMillis) }
+                val assertJob = async {
+                    var matched = false
+                    while (running && !matched) {
+                        select<Unit> {
+                            watcher.events.onReceive { event ->
+                                println("$event")
+                                if (condition.predicate(event)) matched = true
+                                if (event is Stopped) {
+                                    running = false
+                                }
+                            }
+                            job.onJoin {
                                 running = false
                             }
-                            else -> Unit
                         }
-
-                        add(event)
                     }
+                    matched
+                }
 
-                    job.onJoin {
-                        running = false
+                select<Unit> {
+                    delayJob.onJoin {
+                        assertJob.cancel()
+                        assertJob.join()
+                    }
+                    assertJob.onAwait { matched ->
+                        delayJob.cancel()
+                        delayJob.join()
+                        if (matched) error("Event condition $condition matched in $timeoutMillis")
                     }
                 }
             }
+        }
 
-            return events
+        suspend fun waitUntilEvent(vararg conditions: EventCondition, timeoutMillis: Long = 2000L) {
+            if (!running) error("Watcher stopped before conditions were satisfied")
+            val remainingConditions = conditions.toMutableSet()
+            try {
+                withTimeout(timeoutMillis) {
+                    while (running && remainingConditions.isNotEmpty()) {
+                        select<Unit> {
+                            watcher.events.onReceive { event ->
+                                println("$event")
+                                val matchedCondition = conditions.find { it.predicate(event) }
+                                if (matchedCondition != null) remainingConditions -= matchedCondition
+                                if (event is Stopped) {
+                                    running = false
+                                }
+                            }
+                            job.onJoin {
+                                running = false
+                            }
+                        }
+                    }
+
+                    if (remainingConditions.isNotEmpty()) {
+                        error("Watcher stopped before all conditions were satisfied, remaining conditions: $remainingConditions")
+                    }
+                }
+            } catch (e: TimeoutCancellationException) {
+                error("Conditions were not satisfied in $timeoutMillis milliseconds, remaining conditions: $remainingConditions")
+            }
         }
     }
 }

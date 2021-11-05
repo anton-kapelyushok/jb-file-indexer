@@ -21,7 +21,9 @@ private val enableInitialEmitFromFileHasherHack = true
 
 internal sealed interface RootWatcherEvent {
     sealed interface RootWatcherLifeCycleEvent : RootWatcherEvent
-    sealed interface RootWatcherFileEvent : RootWatcherEvent
+    sealed interface RootWatcherFileEvent : RootWatcherEvent {
+        val path: String
+    }
 
     object Overflown : RootWatcherLifeCycleEvent
     object Initialized : RootWatcherLifeCycleEvent
@@ -30,8 +32,8 @@ internal sealed interface RootWatcherEvent {
     object StoppedWatching : RootWatcherLifeCycleEvent
     object Stopped : RootWatcherLifeCycleEvent
 
-    data class FileUpdated(val path: String) : RootWatcherFileEvent
-    data class FileDeleted(val path: String) : RootWatcherFileEvent
+    data class FileUpdated(override val path: String) : RootWatcherFileEvent
+    data class FileDeleted(override val path: String) : RootWatcherFileEvent
 }
 
 data class WatchedRoot(val root: String, val ignoredRoots: Set<String>, val actualRoots: Set<String>)
