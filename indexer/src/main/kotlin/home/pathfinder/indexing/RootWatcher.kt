@@ -17,7 +17,6 @@ import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.random.Random
 
-
 internal sealed interface RootWatcherEvent {
     sealed interface RootWatcherLifeCycleEvent : RootWatcherEvent
     sealed interface RootWatcherFileEvent : RootWatcherEvent {
@@ -35,12 +34,9 @@ internal sealed interface RootWatcherEvent {
     data class FileDeleted(override val path: String) : RootWatcherFileEvent
 }
 
-data class WatchedRoot(val root: String, val ignoredRoots: Set<String>, val actualRoots: Set<String>)
-
 internal class RootWatcher(
     watchedRoot: WatchedRoot,
-    val rwInitialEmitFromFileHasherHackDisabled: Boolean = false,
-
+    private val rwInitialEmitFromFileHasherHackDisabled: Boolean = false,
 ) : Actor {
 
     val events = Channel<RootWatcherEvent>()

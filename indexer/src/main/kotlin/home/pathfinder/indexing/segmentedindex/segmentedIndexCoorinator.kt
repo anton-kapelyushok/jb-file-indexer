@@ -12,14 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import java.util.*
 
-sealed interface DocumentState {
-    data class Indexed(val segmentHolder: SegmentHolder) : DocumentState
-    data class Scheduled(val update: DocumentMessage)
-    data class Running(val cancelToken: CompletableDeferred<Unit>)
-    data class Failed(val e: Throwable) : DocumentState
-}
-
-sealed interface DocumentMessage {
+internal sealed interface DocumentMessage {
     val documentName: String
 
     data class Update(
@@ -32,7 +25,14 @@ sealed interface DocumentMessage {
     ) : DocumentMessage
 }
 
-data class SegmentHolder(var segment: SegmentState)
+private sealed interface DocumentState {
+    data class Indexed(val segmentHolder: SegmentHolder) : DocumentState
+    data class Scheduled(val update: DocumentMessage)
+    data class Running(val cancelToken: CompletableDeferred<Unit>)
+    data class Failed(val e: Throwable) : DocumentState
+}
+
+private data class SegmentHolder(var segment: SegmentState)
 
 internal suspend fun segmentedIndexCoordinator(
     state: MutableStateFlow<IndexStatusInfo>,

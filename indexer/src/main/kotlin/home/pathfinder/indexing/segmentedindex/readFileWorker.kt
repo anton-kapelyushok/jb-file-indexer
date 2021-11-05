@@ -11,18 +11,18 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.selects.select
 
-data class CreateSegmentFromFileInput(
+internal data class CreateSegmentFromFileInput(
     val path: String,
     val data: Flow<Posting<Int>>,
     val cancelToken: CompletableDeferred<Unit>
 )
 
-data class CreateSegmentFromFileResult(
+internal data class CreateSegmentFromFileResult(
     val documentName: String,
     val data: Result<SegmentState>,
 )
 
-suspend fun createSegmentFromFileWorker(
+internal suspend fun createSegmentFromFileWorker(
     input: ReceiveChannel<CreateSegmentFromFileInput>,
     output: SendChannel<CreateSegmentFromFileResult>,
 ) = coroutineScope {

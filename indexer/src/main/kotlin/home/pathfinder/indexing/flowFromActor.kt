@@ -11,12 +11,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 
-interface FlowFromActorMessage<ResultData : Any> {
+internal interface FlowFromActorMessage<ResultData : Any> {
     val cancelChannel: ReceiveChannel<Unit>
     val dataChannel: SendChannel<ResultData>
 }
 
-fun <MessageType : Any, ResultData : Any> flowFromActor(
+internal fun <MessageType : Any, ResultData : Any> flowFromActor(
     mailBox: SendChannel<MessageType>,
     createMessage: (
         receivedCancelled: ReceiveChannel<Unit>,
@@ -37,7 +37,7 @@ fun <MessageType : Any, ResultData : Any> flowFromActor(
     }
 }
 
-suspend fun <ResultData : Any> handleFlowFromActorMessage(
+internal suspend fun <ResultData : Any> handleFlowFromActorMessage(
     msg: FlowFromActorMessage<ResultData>,
     fn: suspend (SendChannel<ResultData>) -> Unit
 ) = try {

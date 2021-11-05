@@ -4,16 +4,16 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
 
-data class MergeSegmentsInput(
+internal data class MergeSegmentsInput(
     val segmentsToMerge: Collection<SegmentState>
 )
 
-data class MergeSegmentsResult(
+internal data class MergeSegmentsResult(
     val originalSegments: Collection<SegmentState>,
     val resultSegment: SegmentState,
 )
 
-suspend fun mergeSegmentsWorker(
+internal suspend fun mergeSegmentsWorker(
     input: ReceiveChannel<MergeSegmentsInput>,
     output: SendChannel<MergeSegmentsResult>,
 ) = coroutineScope {

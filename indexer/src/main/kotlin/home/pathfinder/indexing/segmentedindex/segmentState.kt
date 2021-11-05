@@ -7,7 +7,7 @@ import java.util.concurrent.atomic.AtomicLong
 private val segmentIdSequence = AtomicLong(0L)
 
 @Suppress("ArrayInDataClass")
-data class SegmentState(
+internal data class SegmentState(
     val id: Long,
 
     val documents: Array<String>,
@@ -32,7 +32,7 @@ data class SegmentState(
     }
 }
 
-fun SegmentState.memoryConsumption(): Long {
+internal fun SegmentState.memoryConsumption(): Long {
     var result = 0L
 
     result += termData.size
@@ -44,12 +44,12 @@ fun SegmentState.memoryConsumption(): Long {
     return result
 }
 
-fun SegmentState.alivePostingsFraction(): Double {
+internal fun SegmentState.alivePostingsFraction(): Double {
     if (alivePostings == 0) return 0.0
     return alivePostings.toDouble() / dataTermIds.size
 }
 
-fun createSegment(document: String, documentData: List<Posting<Int>>): SegmentState {
+internal fun createSegment(document: String, documentData: List<Posting<Int>>): SegmentState {
 //    return SegmentState(segmentIdSequence.incrementAndGet(), arrayOf(), booleanArrayOf(), byteArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), intArrayOf(), 0)
 
     val uniqueTerms = documentData.map { it.term }.toSet().sorted()
@@ -98,7 +98,7 @@ private fun toStringData(uniqueTerms: List<String>): Pair<ByteArray, IntArray> {
     return termData to termOffsets
 }
 
-fun SegmentState.deleteDocument(document: String): SegmentState {
+internal fun SegmentState.deleteDocument(document: String): SegmentState {
     val docId = documents.binarySearch(document)
     return copy(
         documentsState = documentsState.copyOf().also { it[docId] = false },
@@ -106,11 +106,11 @@ fun SegmentState.deleteDocument(document: String): SegmentState {
     )
 }
 
-fun SegmentState.getAliveDocuments(): List<String> {
+internal fun SegmentState.getAliveDocuments(): List<String> {
     return documents.indices.mapNotNull { if (documentsState[it]) documents[it] else null }
 }
 
-fun mergeSegments(segment1: SegmentState, segment2: SegmentState): SegmentState {
+internal fun mergeSegments(segment1: SegmentState, segment2: SegmentState): SegmentState {
     val newDocuments = (segment1.getAliveDocuments() + segment2.getAliveDocuments()).toSortedSet().toTypedArray()
 
     val docIdLookupMap = newDocuments.indices.associateBy { newDocuments[it] }
@@ -219,7 +219,7 @@ fun mergeSegments(segment1: SegmentState, segment2: SegmentState): SegmentState 
     )
 }
 
-fun SegmentState.termAt(idx: Int): String {
+internal fun SegmentState.termAt(idx: Int): String {
     val start = termOffsets[idx]
     val end = if (idx + 1 == termOffsets.size) termData.size
     else termOffsets[idx + 1]
@@ -227,7 +227,7 @@ fun SegmentState.termAt(idx: Int): String {
     return String(termData.copyOfRange(start, end))
 }
 
-fun SegmentState.find(term: String): List<SearchResultEntry<Int>> {
+internal fun SegmentState.find(term: String): List<SearchResultEntry<Int>> {
     val termId = binarySearch(0, termOffsets.size - 1) {
         termAt(it) >= term
     }

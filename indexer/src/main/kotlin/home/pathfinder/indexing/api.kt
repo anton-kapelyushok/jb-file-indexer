@@ -95,6 +95,8 @@ data class Posting<TermData : Any>(
     val termData: TermData,
 )
 
+data class WatchedRoot(val root: String, val ignoredRoots: Set<String>, val actualRoots: Set<String>)
+
 data class FileIndexerStatusInfo(
     val indexInfo: IndexStatusInfo,
     val watcherStates: Map<WatchedRoot, RootWatcherStateInfo>
