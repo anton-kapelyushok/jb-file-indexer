@@ -40,9 +40,9 @@ internal suspend fun segmentedIndexCoordinator(
     documentUpdateInput: ReceiveChannel<DocumentMessage>,
     searchInput: ReceiveChannel<SearchExactMessage<Int>>,
 
-    createSegmentFromFileConcurrency: Int = 16,
-    mergeSegmentsConcurrency: Int = 4,
-    targetSegmentsCount: Int = 32,
+    createSegmentFromFileConcurrency: Int,
+    mergeSegmentsConcurrency: Int,
+    targetSegmentsCount: Int,
 ) = coroutineScope {
     val createSegmentFromFileInput = Channel<CreateSegmentFromFileInput>()
     val createSegmentFromFileOutput = Channel<CreateSegmentFromFileResult>()

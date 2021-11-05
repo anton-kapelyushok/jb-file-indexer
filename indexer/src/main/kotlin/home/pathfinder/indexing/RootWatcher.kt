@@ -17,7 +17,6 @@ import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.random.Random
 
-private val enableInitialEmitFromFileHasherHack = true
 
 internal sealed interface RootWatcherEvent {
     sealed interface RootWatcherLifeCycleEvent : RootWatcherEvent
@@ -40,6 +39,8 @@ data class WatchedRoot(val root: String, val ignoredRoots: Set<String>, val actu
 
 internal class RootWatcher(
     watchedRoot: WatchedRoot,
+    val rwInitialEmitFromFileHasherHackDisabled: Boolean = false,
+
 ) : Actor {
 
     val events = Channel<RootWatcherEvent>()
@@ -120,7 +121,7 @@ internal class RootWatcher(
                 initializing.set(false)
 
                 if (!cancel.isCompleted && watcher != null) {
-                    if (!enableInitialEmitFromFileHasherHack) runInterruptible { emitInitialDirectoryStructure() }
+                    if (rwInitialEmitFromFileHasherHackDisabled) runInterruptible { emitInitialDirectoryStructure() }
                     emitStarted()
 
                     val job = launch(Dispatchers.IO) {
@@ -170,7 +171,7 @@ internal class RootWatcher(
                 }
 
                 // A hack to speed up initialization process
-                if (enableInitialEmitFromFileHasherHack && initializing.get()) {
+                if (!rwInitialEmitFromFileHasherHackDisabled && initializing.get()) {
                     if (!isIgnored(path))
                         runBlocking {
                             emitFileAdded(path.toString())

@@ -28,6 +28,7 @@ internal sealed interface IndexerEvent {
 internal class FileIndexerImpl(
     private val index: Index<Int>,
     private val tokenize: (String) -> Flow<Posting<Int>>,
+    private val additionalProperties: Map<String, Any>,
 ) : FileIndexer {
 
     private val rootWatcherStates = mutableMapOf<WatchedRoot, RootWatcherState>()
@@ -179,7 +180,7 @@ internal class FileIndexerImpl(
     private suspend fun launchWatcher(scope: CoroutineScope, path: WatchedRoot) {
         assert(rootWatcherStates[path] == null)
 
-        val watcher = RootWatcher(path)
+        val watcher = RootWatcher(path, rwInitialEmitFromFileHasherHackDisabled())
 
         rootWatcherStates[path] = RootWatcherState.Initializing { watcher.cancel() }
 
@@ -205,4 +206,7 @@ internal class FileIndexerImpl(
         val searchIsAllowed = allWatchersReady && allRootsAreWatched
         index.setSearchLockStatus(status = !searchIsAllowed)
     }
+
+    private fun rwInitialEmitFromFileHasherHackDisabled(): Boolean =
+        additionalProperties[rwInitialEmitFromFileHasherHackDisabled] == true
 }
