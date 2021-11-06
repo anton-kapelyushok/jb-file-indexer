@@ -64,51 +64,38 @@
 
 В модуле app функция home.pathfinder.app.main реализующая REPL, поддерживает 4 команды
 
-* watch [root1] [root2] ... // выбрать каталоги для поиска
+* watch root1 root2 -root3 // следить за каталогами root1, root2, игнорируя файлы в root3
 * status // показать текущий статус
 * find [term] // найти [term] в каталогах указанных в команде watch
+* pollstatus // выводит статус каждую секунду
 * exit
 
 Пример исполнения:
 
 ````
-Enter command (watch/find/status/exit)
-watch indexer app
+Enter command (watch/find/status/exit/pollstatus)
+watch .
 
-Enter command (watch/find/status/exit)
+Enter command (watch/find/status/exit/pollstatus)
 find main()
 
 searching, press any key to cancel
-main(): /Users/akapelyushok/Projects/jb-file-indexer/app/src/main/kotlin/home/pathfinder/app/App.kt:15
+main(): C:\Users\Anton\projects\jb-file-indexer-1\readme.md:80
+main(): C:\Users\Anton\projects\jb-file-indexer-1\app\src\main\kotlin\home\pathfinder\app\App.kt:11
 
-Total 1 entries
-Found in 2ms
+Total 2 entries
+Found in 28ms
 
-Enter command (watch/find/status/exit)
-status
-
-indexInfo: 
-IndexStatusInfo(searchLocked=false, runningUpdates=0, pendingUpdates=0, indexedDocuments=605, errors={})
-
-rootStates:
-/Users/akapelyushok/Projects/jb-file-indexer/indexer=RootWatcherStateInfo(status=Running, exception=null)
-/Users/akapelyushok/Projects/jb-file-indexer/app=RootWatcherStateInfo(status=Running, exception=null)
-
-Enter command (watch/find/status/exit)
+Enter command (watch/find/status/exit/pollstatus)
 exit
+
 ````
 
-## Внутренняя реализация
+## Реализация
 
 ### FileIndexer
 
-Метод `fileIndexer()` возвращает объект класса `FileIndexer`, который является актором. Его нужно запустить в каком
-нибудь скоупе с помощью метода `FileWatcher::go`.
-
-Он в свою очередь запускает индекс (который так же реализован как актор), менеджит рут вотчеры - запускает и завершает
-их и обеспечивает коммуникацию между рут вотчерами и индеком.
-
-Все это происходит при обработке очереди `indexerEvents` (`FileIndexerImpl::go`)
+Менеджит запросы пользователя, индекс и вотчеры, обеспечивает коммуникацию между ними.
 
 ### Индекс
 
@@ -131,15 +118,19 @@ exit
 
 ### SegmentedIndex
 
-Идея следующая: индекс разделен на несколько сегментов (Segment)  
-При добавлении файла создается новый сегмент.  
-При удалении файла мы находим сегмент в котором содержится информация про этот файл и удаляем его из этого сегмента.
-Операция удаления соответственно должна быть быстрой  
-Обновление файла = удаление + обновление
+По мотивам индекса в Apache Lucene (https://www.youtube.com/watch?v=T5RmMNDR5XI)
 
-При поиске мы копируем ссылки на текущие индексы и передаем их в search job, таким образом обновления файлов не влияют на поиск.
+Идея следующая: индекс разделен на несколько иммутабельных сегментов (Segment)
 
-Параллельно выполняется воркер который сливает индексы, если их становится слишком много и очищает их от удаленных файлов.
+При добавлении документа создается новый сегмент.
+
+При удалении просто помечаем документ как удаленный.
+
+Обновление документа = удаление + обновление.
+
+Если сегментов становится слишком много, специально обученный воркер сливает их в один.
+
+При поиске текущий набор сегментов копируется и сам поиск осуществляется уже по этой копии.
 
 Сам сегмент реализован с помощью следующей структуры:
 
@@ -160,47 +151,34 @@ exit
         val alivePostings: Int,
     )
 
-documents - список документов в сегменте, documentsState - состояние этого документа, удален он или нет.
+`documents`: отсортированный список документов в индексе, `documentsState[i]` - состояние i го документа (удален или
+нет)
 
-termData + termOffsets - список уникальных лексиграфически отсортированных термов в бинарном виде. 
-Чтобы прочитать какой то терм с индексом i, необходимо сделать `String(termData.copyOfRange(termOffsets[i], termOffsets[i+1]))`
-Хранятся как byteArray для экономии места на метадате строк.
+`termData` + `termOffsets` - отсортированные термы в бинарном виде.   
+`term[i] = String(termData.copyOfRange(termOffsets[i], termOffsets[i+1]))`
 
-dataTermIds[i], dataDocIds[i], dataTermData[i] - данные о вхождении терма. Отсортированы в этом же порядке.
-
-dataTermIds[i]  указывает на termOffsets, dataDocIds указывает на documents 
+`dataTermIds[i]`, `dataDocIds[i]`, `dataTermData[i]` - данные об i-том вхождении терма. Вхождения отсортированы в этом
+же порядке  
+`dataTermIds[i]`  указывает на `termOffsets`, `dataDocIds` указывает на `documents`
 
 ### RootWatcher
 
-Я вначале попытался использовать дефолтный джавовый файлвотчер, но на MacOS он реализован как PoolingWatcherService и
-это было невыносимо. Idea испольует какой то нативный, с ним тоже не хотелось возиться, в итоге я остановился на
-библиотеке `io.methvin:directory-watcher`
+В качестве file watcher библиотеки я рассматривал несколько вариантов:
+
+* дефолтный - не подошел, так как для MacOS используется PollingWatcherService, который работает отвратительно медленно
+* Idea filewatcher - показался, во-первых, сложным в интеграции, во-вторых, нечестным
+* `io.methvin:directory-watcher` - остановился на этом, так как реализует нормальный WatcherService для MacOS.
+
+Из недостатков этого вотчера - поведение отличается на разных платформах. Например, на Windows не получается смотреть за
+изменениями одного файла. Так же этот filewatcher смотрит директории исключительно рекурсивно.
 
 У `DirectoryWatcher` из этой библиотеки есть два долгих блокирующих вызова - `build()` и `watch()` и ему можно
 передать `listener` файловых эвентов.
 
 Класс `RootWatcher` - неблокирующая обертка над этим вотчером, реализованная в виде актора.
 
-Идея следующая:
-
-`RootWatcher` при запуске инициализирует `DirectoryWatcher`. Как только он запустился он выплевывает в
-исходящий `events` канал содержимое директории которой заведует `RootWatcher`. Далее выплевывается эвент `Initialized` -
-значит, что watcher находится в консистентном состояние. В случае если он видит событие в cancelation токене
-- `RootWatcher` закрывает `DirectoryWatcher`, кидает событие `StoppedWatching`. Затем кидает `FileDeleted` эвенты для
-  всех файлов за которыми он смотрел и наконец кидает `Stopped`.
+При запуске отправляются события на добавление файлов, которыми заведует вотчер.  
+При завершении отправляются события на удаление всех файлов.
 
 `FileIndexer` отслеживает состояние вотчера с помощью `RootWatcherState`.
 
-Все это происходит в методе `launchWatchWorker`.
-
-Для того чтобы эвенты шли в правильном порядке и для трекинга файлов `RootWatcher` так же запускает `StateWatcher`. Это
-происходит в `launchStateHolder`
-
-Еще `DirectoryWatcher` оказался довольно таки вредным и отказывался нормально завершаться, поэтому на каждый чих я его
-пытаюсь закрыть.
-
-## Возможные улучшения
-
-* RootWatcher не очень хорошо работает просто с файлами
-
-(SegmentedIndex вроде бы решает все эти проблемы, но я его не успел дописать)
