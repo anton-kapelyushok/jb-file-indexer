@@ -1,5 +1,6 @@
 package home.pathfinder.app
 
+import home.pathfinder.indexing.FileIndexer
 import home.pathfinder.indexing.fileIndexer
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -63,64 +64,22 @@ fun main() {
 
                     when (val cmd = parts[0]) {
 
-                        "watch" -> try {
-                            val (ignoredRoots, roots) = parts.subList(1, parts.size).partition { it.startsWith("-") }
+                        "watch" -> watch(fileIndexer, parts.subList(1, parts.size))
 
-                            fileIndexer.updateContentRoots(roots.toSet(), ignoredRoots.map { it.substring(1) }.toSet())
-                        } catch (e: Throwable) {
-                            println("error: $e")
+                        "watch+find" -> {
+                            watch(fileIndexer, parts.subList(1, parts.size))
+                            find(fileIndexer, "poupa", ::readLine)
                         }
 
                         "find" -> {
-                            println("searching, press any key to cancel")
-                            val searchJob = launch {
-                                val statusJob = launch {
-                                    while (true) {
-                                        delay(1000)
-                                        println("###############")
-                                        println(fileIndexer.state.value)
-                                        println()
-                                    }
-                                }
-
-                                var count = 0
-                                val duration = measureTimeMillis {
-                                    if (parts.size != 2) return@measureTimeMillis
-                                    fileIndexer.searchExact(parts[1])
-                                        .collect { (documentName, term, lineNumber) ->
-                                            println("$term: $documentName:$lineNumber")
-                                            count++
-                                        }
-                                }
-                                statusJob.cancel()
-                                if (count == 0) println("Nothing found")
-                                else {
-                                    println()
-                                    println("Total $count entries")
-                                }
-                                println("Found in ${duration}ms")
-                                println()
-                            }
-
-                            val readlineJob = launch { readLine() }
-                            select<Unit> {
-                                readlineJob.onJoin {
-                                    searchJob.cancel()
-                                    searchJob.join()
-                                }
-                                searchJob.onJoin {
-                                    readlineJob.cancel()
-                                    readlineJob.join()
-                                }
-                            }
-
-                            searchJob.join()
+                            find(fileIndexer, parts[1], ::readLine)
                         }
 
                         "status" -> {
                             println(fileIndexer.state.value)
                             println()
                         }
+
                         "pollstatus" -> {
                             val pollJob = launch {
                                 while (true) {
@@ -149,5 +108,68 @@ fun main() {
             indexerJob.cancel()
             consoleReaderJob.cancel()
         }
+    }
+}
+
+private suspend fun CoroutineScope.find(
+    fileIndexer: FileIndexer,
+    term: String,
+    readLine: suspend () -> String,
+) {
+    println("searching, press any key to cancel")
+    val searchJob = launch {
+        val statusJob = launch {
+            var timeElapsed = 0
+            while (true) {
+                delay(1000)
+                println("############### ${++timeElapsed}")
+                println(fileIndexer.state.value)
+                println()
+            }
+        }
+
+        var count = 0
+        val duration = measureTimeMillis {
+            fileIndexer.searchExact(term)
+                .collect { (documentName, term, lineNumber) ->
+                    println("$term: $documentName:$lineNumber")
+                    count++
+                }
+        }
+        statusJob.cancel()
+        if (count == 0) println("Nothing found")
+        else {
+            println()
+            println("Total $count entries")
+        }
+        println("Found in ${duration}ms")
+        println()
+    }
+
+    val readlineJob = launch { readLine() }
+    select<Unit> {
+        readlineJob.onJoin {
+            searchJob.cancel()
+            searchJob.join()
+        }
+        searchJob.onJoin {
+            readlineJob.cancel()
+            readlineJob.join()
+        }
+    }
+
+    searchJob.join()
+}
+
+private suspend fun watch(
+    fileIndexer: FileIndexer,
+    input: List<String>
+) {
+    try {
+        val (ignoredRoots, roots) = input.partition { it.startsWith("-") }
+
+        fileIndexer.updateContentRoots(roots.toSet(), ignoredRoots.map { it.substring(1) }.toSet())
+    } catch (e: Throwable) {
+        println("error: $e")
     }
 }

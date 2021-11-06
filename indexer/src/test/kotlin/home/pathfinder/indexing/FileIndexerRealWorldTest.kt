@@ -11,13 +11,13 @@ import kotlin.system.measureTimeMillis
 
 private val workingDirRoot = "/Users/akapelyushok/Projects/intellij-community"
 
-class FileIndexerPerformanceTest {
+class FileIndexerRealWorldTest {
     @Test
     @Disabled
     fun `time until first search`() {
         runBlocking {
             val indexer = fileIndexer(
-                segmentedIndex(mergeSegmentsConcurrency = 1),
+                segmentedIndex(),
                 additionalProperties = mapOf(rwInitialEmitFromFileHasherHackDisabled to false)
             )
             val job = launch(Dispatchers.Default) { indexer.go(this) }

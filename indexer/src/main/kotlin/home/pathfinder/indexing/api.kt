@@ -19,13 +19,17 @@ fun fileIndexer(
 
 fun hashMapIndex(): Index<Int> = HashMapIndex()
 fun segmentedIndex(
-    createSegmentFromFileConcurrency: Int = 16,
+    createSegmentFromFileConcurrency: Int = 4,
     mergeSegmentsConcurrency: Int = 4,
     targetSegmentsCount: Int = 32,
+    mergeWhileIndexingThreshold: Int = 1024,
+    mergeSegmentsWhileIndexing: Boolean = true
 ): Index<Int> = SegmentedIndex(
-    createSegmentFromFileConcurrency,
-    mergeSegmentsConcurrency,
-    targetSegmentsCount,
+    createSegmentFromFileConcurrency = createSegmentFromFileConcurrency,
+    mergeSegmentsWhileIndexing = mergeSegmentsWhileIndexing,
+    mergeWhileIndexingThreshold = mergeWhileIndexingThreshold,
+    mergeSegmentsConcurrency = mergeSegmentsConcurrency,
+    targetSegmentsCount = targetSegmentsCount,
 )
 
 interface FileIndexer : Actor {

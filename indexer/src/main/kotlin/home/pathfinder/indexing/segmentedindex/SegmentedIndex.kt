@@ -10,7 +10,9 @@ import kotlinx.coroutines.launch
 
 internal class SegmentedIndex(
     private val createSegmentFromFileConcurrency: Int,
+    private val mergeSegmentsWhileIndexing: Boolean,
     private val mergeSegmentsConcurrency: Int,
+    private val mergeWhileIndexingThreshold: Int,
     private val targetSegmentsCount: Int,
 ) : Index<Int> {
     private val searchLockInput = Channel<Boolean>()
@@ -41,7 +43,9 @@ internal class SegmentedIndex(
                 searchInput = searchInput,
                 createSegmentFromFileConcurrency = createSegmentFromFileConcurrency,
                 mergeSegmentsConcurrency = mergeSegmentsConcurrency,
-                targetSegmentsCount = targetSegmentsCount
+                targetSegmentsCount = targetSegmentsCount,
+                mergeSegmentsWhileIndexing = mergeSegmentsWhileIndexing,
+                mergeWhileIndexingThreshold = mergeWhileIndexingThreshold,
             )
         }
 
