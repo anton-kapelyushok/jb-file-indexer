@@ -22,7 +22,7 @@ class PathTreeTest {
         assertThat(tree.parentOf("" / "loupa" / "volobuev")).isEqualTo("" / "loupa")
         assertThat(tree.parentOf("" / "loupa" / "poupa" / "mech")).isEqualTo("" / "loupa" / "poupa")
         assertThat(tree.parentOf("" / "loupa" / "poupapa")).isEqualTo("" / "loupa")
-        assertThat(tree.parentOf("" / "poupa" / "loupa")).isEqualTo("" / "loupa")
+        assertThat(tree.parentOf("" / "poupa" / "loupa")).isEqualTo(null)
     }
 
     @Test
