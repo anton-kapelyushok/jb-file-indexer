@@ -29,6 +29,7 @@ internal suspend fun createSegmentFromFileWorker(
     for (msg in input) {
         if (msg.cancelToken.isCompleted) {
             output.send(CreateSegmentFromFileResult(msg.path, Result.failure(CancellationException())))
+            continue
         }
         val dataDeferred = async {
             runCatching { msg.data.toList() }

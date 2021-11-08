@@ -117,11 +117,10 @@ internal class RootWatcher(
                 initializing.set(false)
 
                 if (!cancel.isCompleted && watcher != null) {
-                    if (!rwInitialEmitFromFileHasherHackEnabled) runInterruptible { emitInitialDirectoryStructure() }
-                    emitStarted()
-
                     val job = launch(Dispatchers.IO) {
                         try {
+                            if (!rwInitialEmitFromFileHasherHackEnabled) runInterruptible { emitInitialDirectoryStructure() }
+                            emitStarted()
                             runInterruptible {
                                 watcher.watch()
                             }
