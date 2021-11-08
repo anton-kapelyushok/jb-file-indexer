@@ -180,7 +180,7 @@ internal class FileIndexerImpl(
     private suspend fun launchWatcher(scope: CoroutineScope, path: WatchedRoot) {
         assert(rootWatcherStates[path] == null)
 
-        val watcher = RootWatcher(path, rwInitialEmitFromFileHasherHackDisabled())
+        val watcher = RootWatcher(path, rwInitialEmitFromFileHasherHackEnabled())
 
         rootWatcherStates[path] = RootWatcherState.Initializing { watcher.cancel() }
 
@@ -207,6 +207,6 @@ internal class FileIndexerImpl(
         index.setSearchLockStatus(status = !searchIsAllowed)
     }
 
-    private fun rwInitialEmitFromFileHasherHackDisabled(): Boolean =
-        additionalProperties[rwInitialEmitFromFileHasherHackDisabled] == true
+    private fun rwInitialEmitFromFileHasherHackEnabled(): Boolean =
+        additionalProperties[rwInitialEmitFromFileHasherHackEnabled] == true
 }

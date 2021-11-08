@@ -2,6 +2,7 @@ package home.pathfinder.app
 
 import home.pathfinder.indexing.FileIndexer
 import home.pathfinder.indexing.fileIndexer
+import home.pathfinder.indexing.rwInitialEmitFromFileHasherHackEnabled
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collect
@@ -21,7 +22,7 @@ fun main() {
 //            tokenize = { path ->
 //                kotlinx.coroutines.flow.flow { emit(home.pathfinder.indexing.Posting(path.split("/").last(), 0)) }
 //            },
-//            additionalProperties = mapOf(home.pathfinder.indexing.rwInitialEmitFromFileHasherHackDisabled to true)
+//            additionalProperties = mapOf(home.pathfinder.indexing.rwInitialEmitFromFileHasherHackEnabled to true)
 //        )
 
         val fileIndexer = fileIndexer()

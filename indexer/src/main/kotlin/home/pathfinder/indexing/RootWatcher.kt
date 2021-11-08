@@ -36,7 +36,7 @@ internal sealed interface RootWatcherEvent {
 
 internal class RootWatcher(
     watchedRoot: WatchedRoot,
-    private val rwInitialEmitFromFileHasherHackDisabled: Boolean = false,
+    private val rwInitialEmitFromFileHasherHackEnabled: Boolean = false,
 ) : Actor {
 
     val events = Channel<RootWatcherEvent>()
@@ -117,7 +117,7 @@ internal class RootWatcher(
                 initializing.set(false)
 
                 if (!cancel.isCompleted && watcher != null) {
-                    if (rwInitialEmitFromFileHasherHackDisabled) runInterruptible { emitInitialDirectoryStructure() }
+                    if (!rwInitialEmitFromFileHasherHackEnabled) runInterruptible { emitInitialDirectoryStructure() }
                     emitStarted()
 
                     val job = launch(Dispatchers.IO) {
@@ -167,7 +167,7 @@ internal class RootWatcher(
                 }
 
                 // A hack to speed up initialization process
-                if (!rwInitialEmitFromFileHasherHackDisabled && initializing.get()) {
+                if (rwInitialEmitFromFileHasherHackEnabled && initializing.get()) {
                     if (!isIgnored(path))
                         runBlocking {
                             emitFileAdded(path.toString())

@@ -18,7 +18,7 @@ class FileIndexerRealWorldTest {
         runBlocking {
             val indexer = fileIndexer(
                 segmentedIndex(),
-                additionalProperties = mapOf(rwInitialEmitFromFileHasherHackDisabled to false)
+                additionalProperties = mapOf(rwInitialEmitFromFileHasherHackEnabled to false)
             )
             val job = launch(Dispatchers.Default) { indexer.go(this) }
 

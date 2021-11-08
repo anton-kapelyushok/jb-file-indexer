@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 typealias Term = String
 typealias DocumentName = String
 
-const val rwInitialEmitFromFileHasherHackDisabled = "rwInitialEmitFromFileHasherHackDisabled"
+const val rwInitialEmitFromFileHasherHackEnabled = "rwInitialEmitFromFileHasherHackEnabled"
 
 fun fileIndexer(
     index: Index<Int> = segmentedIndex(),
