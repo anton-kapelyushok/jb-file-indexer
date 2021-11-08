@@ -106,6 +106,7 @@ internal suspend fun segmentedIndexCoordinator(
                     val segment = indexedDocuments[documentName]?.segmentHolder?.segment
                     val shouldWaitForMerge = segment != null && segment !in segments
 
+                    failedDocuments.remove(documentName)
                     indexingDocuments[documentName]?.cancelToken?.complete(Unit)
 
                     if (shouldWaitForMerge) scheduledWaitingDocuments[documentName] = DocumentState.Scheduled(msg)
