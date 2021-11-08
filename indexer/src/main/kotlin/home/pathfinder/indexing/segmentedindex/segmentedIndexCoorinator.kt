@@ -163,6 +163,8 @@ internal suspend fun segmentedIndexCoordinator(
             }
 
             run { // run updates
+                // TODO FIXME: if deletes are the only one lefts we are screwed
+
                 val pickedUpdates = scheduledReadyDocuments.asSequence()
                     .filter { (documentName) -> documentName !in indexingDocuments }
                     .take(createSegmentFromFileConcurrency - indexingDocuments.size)
