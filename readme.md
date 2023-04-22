@@ -1,3 +1,7 @@
+v2 basede on feedback here: https://github.com/anton-kapelyushok/jb-indexer-v2
+
+
+
 # PATHFINDER
 
 ## Build
